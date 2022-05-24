@@ -13,7 +13,7 @@ import wandb
 
 from utils.common_utils import (save_checkpoint, parse, dprint, time_log, compute_param_norm,
                                 freeze_bn, zero_grad_bn, RunningAverage, RunningAverageDict, Timer)
-from utils.depth_utils import cal_eval_mask, compute_errors
+# from utils.seg_utils import comppute_error
 from utils.dist_utils import all_reduce_dict
 from utils.wandb_utils import set_wandb
 
@@ -56,16 +56,18 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
     else:
         train_loader = None
 
-    val_dataset = build_dataset(opt["dataset"], mode="test")
+    val_dataset = build_dataset(opt["dataset"], mode="val")
     val_loader = build_dataloader(val_dataset, opt["dataloader"], shuffle=False,
                                   batch_size=dist.get_world_size())
 
+    test_dataset = build_dataset(opt["dataset"], mode="test")
+    test_loader = build_dataloader(test_dataset, opt["dataloader"], shuffle=False,
+                                  batch_size=dist.get_world_size())
+
     data_type = val_dataset.data_type
-    min_depth = val_dataset.min_depth
-    max_depth = val_dataset.max_depth
 
     # -------------------------- Define -------------------------------#
-    model = build_model(opt["model"], min_depth=min_depth, max_depth=max_depth)  # CPU model
+    model = build_model(opt["model"])  # CPU model
     criterion = build_criterion(opt, val_dataset)  # CPU criterion
 
     device = torch.device("cuda", local_rank)  # "cuda:0" for single GPU
