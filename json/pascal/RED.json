@@ -5,19 +5,30 @@
     "wandb": {
         "project": "Jigmentation",
         "entity": "00310214aa-",
-        "name": "SeMask",
+        "name": "RED",
         "mode": "online"
     },
     "model": {
-        "name": "SeMask",
+        "name": "RED",
         "bn_momentum": 0.1,
-        "bn_eps": 1.0e-3
+        "bn_eps": 1.0e-3,
+        "encoder_type": "large",
+        "dec_dim": 512,
+        "num_heads": 8,
+        "num_repeats": 3,
+        "num_emb": 128,
+        "window_size": 8,
+        "drop_prob": 0.0,
+        "attn_drop_prob": 0.0,
+        "bias_type": "seg",
+        "neck_type": "red"
     },
     "loss": {
+        "ce_weight" : 1
     },
     "dataset": {
         "data_type": "PASCAL",
-        "data_path": "/data/Datasets/PASCAL/VOCdevkit/VOC2012",
+        "data_path": "../Datasets/PASCAL/VOCdevkit/VOC2012",
         "num_classes" : 21,
         "ignore_label" : 255,
         "input_size" : [368, 368],
@@ -28,12 +39,19 @@
         "num_workers": 8
     },
     "optimizer": {
-        "name": "adamw",
-        "weight_decay":,
-
+        "lr": 0.0001,
+        "betas": [0.9, 0.999],
+        "weight_decay": 0.1,
+        "eps": 1.0e-6,
+        "same_lr": true
     },
     "scheduler": {
-        "name" : ,
+        "name" : "onecycle",
+        "warmup_iter" : 1500,
+        "pct_start": 0.25,
+        "div_factor": 25,
+        "final_div_factor": 100,
+        "cycle_momentum": false
     },
     "train": {
         "print_freq": 25,

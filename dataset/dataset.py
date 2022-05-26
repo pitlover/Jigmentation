@@ -70,10 +70,10 @@ class SegDataset(Dataset):
         return len(self.filenames)
 
     def __getitem__(self, idx: int) -> Dict:
-        path = self.filenames[idx]
+        path = self.filenames[idx].replace("\n", "")
 
-        image_path = os.path.join(self.img_path, path)
-        gt_path = os.path.join(self.gt_path, path)
+        image_path = os.path.join(self.img_path, path +".jpg")
+        gt_path = os.path.join(self.gt_path, path + "png")
 
         # ------------------------ train ------------------------------#
         if self.data_type == "PASCAL":
@@ -86,6 +86,8 @@ class SegDataset(Dataset):
 
             gt = Image.open(gt_path)  # (h, w), 16-bit grayscale
 
+        print(image.shape)
+        print(gt.shape)
 
         sample = {'image': image, 'gt': gt,
                   'image_path': image_path, 'gt_path': gt_path}

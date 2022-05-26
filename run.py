@@ -1,6 +1,8 @@
 from typing import Dict, Tuple
 import argparse
 from functools import partial
+
+import cv2
 import numpy as np
 import torch
 import torch.nn as nn
@@ -13,7 +15,7 @@ import wandb
 
 from utils.common_utils import (save_checkpoint, parse, dprint, time_log, compute_param_norm,
                                 freeze_bn, zero_grad_bn, RunningAverage, RunningAverageDict, Timer)
-# from utils.seg_utils import comppute_error
+from utils.seg_utils import compute_miou
 from utils.dist_utils import all_reduce_dict
 from utils.wandb_utils import set_wandb
 
@@ -114,24 +116,21 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
 
         start_epoch = max(checkpoint.get('epoch', 0), 0)
         current_iter = max(checkpoint.get('iter', 0), 0)
-        best_metric = min(checkpoint.get("best", 1e7), 1e7)  # abs rel, lower better
+        best_metric = min(checkpoint.get("best", 0), 0)  # abs rel, lower better
         best_epoch = max(checkpoint.get('best_epoch', 0), 0)
         best_iter = max(checkpoint.get('best_iter', 0), 0)
-        best2_metric = min(checkpoint.get("best2", 1e7), 1e7)  # rmse, lower better
-        best2_epoch = max(checkpoint.get('best2_epoch', 0), 0)
-        best2_iter = max(checkpoint.get('best2_iter', 0), 0)
         print_fn(f"Checkpoint loaded: epoch {start_epoch}, iters {current_iter}, best metric: {best_metric:.6f}")
     else:
         start_epoch, current_iter = 0, 0
-        best_metric, best_epoch, best_iter = 1e7, 0, 0
-        best2_metric, best2_epoch, best2_iter = 1e7, 0, 0
+        best_metric, best_epoch, best_iter = 0, 0, 0
         if is_test:
             print_fn("Warning: testing but checkpoint is not loaded.")
 
     # ------------------- Scheduler -----------------------#
     if is_train:
-        num_accum = max(opt["train"]["num_accum"], 1)
-        scheduler = build_scheduler(opt, optimizer, train_loader, start_epoch)
+        num_accum =opt["train"]["num_accum"]
+        max_iter = len(train_loader) * opt["dataloader"]["batch_size"]
+        scheduler = build_scheduler(opt, optimizer, train_loader, max_iter, start_epoch)
         if start_epoch != 0:
             scheduler.step(start_epoch + 1)
     else:
@@ -154,7 +153,6 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
             s += f"[TEST] {metric_k} : {metric_v:.6f}\n"
         s += f"[TEST] time: {test_time:.3f}"
         print_fn(s)
-
         print_fn(f"-------- Test Finished --------")
         return
 
@@ -171,14 +169,10 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
         if isinstance(m, (nn.BatchNorm1d, nn.BatchNorm2d, nn.SyncBatchNorm)):
             m.momentum /= num_accum
 
-    best_valid_metrics = dict(a1=0.0, a2=0.0, a3=0.0, abs_rel=9999.9, sq_rel=9999.9, rmse=9999.9, rmse_log=9999.9,
-                              silog=9999.0, log_10=9999.9)
-    best2_valid_metrics = dict(a1=0.0, a2=0.0, a3=0.0, abs_rel=9999.9, sq_rel=9999.9, rmse=9999.9, rmse_log=9999.9,
-                               silog=9999.0, log_10=9999.9)
+    best_valid_metrics = dict(mIOU=0, msmIOU=0)
     train_stats = RunningAverage()  # track training loss per epoch
 
-    metric1 = "abs_rel" if (not data_type == "ONLINE") else "silog"
-    metric2 = "rmse"
+    metric = "mIOU"
 
     for current_epoch in range(start_epoch, max_epoch):
         print_fn(f"-------- [{current_epoch}/{max_epoch} (iters: {current_iter})]--------")
@@ -193,7 +187,7 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
         _ = timer.update()
         for i, data in enumerate(train_loader):
             image: torch.Tensor = data['image'].to(device, non_blocking=True)
-            gt_depth: torch.Tensor = data['depth'].to(device, non_blocking=True)
+            gt: torch.Tensor = data['gt'].to(device, non_blocking=True)
             data_time = timer.update()
 
             if freeze_encoder_bn:
@@ -205,7 +199,7 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
             if i % num_accum == 0:
                 optimizer.zero_grad(set_to_none=True)
 
-            model_input = (image, gt_depth)
+            model_input = (image, gt)
             model_output = model(image)
             loss, loss_dict = criterion(model_input, model_output)
             forward_time = timer.update()
@@ -269,13 +263,13 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
                 s += f"[VAL] epoch: {current_epoch}, iters: {current_iter}\n"
                 s += f"[VAL] loss: {valid_loss:.6f}\n"
 
-                # update based on AbsRel
+                # update based on mIOU
                 prev_best_metric = best_metric
-                if best_metric >= valid_metrics[metric1]:
-                    best_metric = valid_metrics[metric1]
+                if best_metric <= valid_metrics[metric]:
+                    best_metric = valid_metrics[metric]
                     best_epoch = current_epoch
                     best_iter = current_iter
-                    s += f"[VAL] -------- updated ({metric1})! {prev_best_metric:.6f} -> {best_metric:.6f}\n"
+                    s += f"[VAL] -------- updated ({metric})! {prev_best_metric:.6f} -> {best_metric:.6f}\n"
                     if is_master:
                         save_checkpoint(
                             "best", model, optimizer,
@@ -284,32 +278,11 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
                         s += f"[VAL] {metric_k} : {best_valid_metrics[metric_k]:.6f} -> {metric_v:.6f}\n"
                     best_valid_metrics.update(valid_metrics)
                 else:
-                    s += f"[VAL] -------- not updated ({metric1})." \
-                         f" (now) {valid_metrics[metric1]:.6f} vs (best) {prev_best_metric:.6f}\n"
+                    s += f"[VAL] -------- not updated ({metric})." \
+                         f" (now) {valid_metrics[metric]:.6f} vs (best) {prev_best_metric:.6f}\n"
                     s += f"[VAL] previous best was at {best_epoch} epoch, {best_iter} iters\n"
                     for metric_k, metric_v in valid_metrics.items():
                         s += f"[VAL] {metric_k} : {metric_v:.6f} vs {best_valid_metrics[metric_k]:.6f}\n"
-
-                # update based on RMSE
-                prev_best2_metric = best2_metric
-                if best2_metric >= valid_metrics[metric2]:
-                    best2_metric = valid_metrics[metric2]
-                    best2_epoch = current_epoch
-                    best2_iter = current_iter
-                    s += f"[VAL] -------- updated ({metric2})! {prev_best2_metric:.6f} -> {best2_metric:.6f}\n"
-                    if is_master:
-                        save_checkpoint(
-                            "best2", model, optimizer,
-                            current_epoch, current_iter, best2_metric, wandb_save_dir, model_only=True)
-                    for metric_k, metric_v in valid_metrics.items():
-                        s += f"[VAL] {metric_k} : {best2_valid_metrics[metric_k]:.6f} -> {metric_v:.6f}\n"
-                    best2_valid_metrics.update(valid_metrics)
-                else:
-                    s += f"[VAL] -------- not updated ({metric2}). " \
-                         f"(now) {valid_metrics[metric2]:.6f} vs (best) {prev_best2_metric:.6f}\n"
-                    s += f"[VAL] previous best was at {best2_epoch} epoch, {best2_iter} iters\n"
-                    for metric_k, metric_v in valid_metrics.items():
-                        s += f"[VAL] {metric_k} : {metric_v:.6f} vs {best2_valid_metrics[metric_k]:.6f}\n"
 
                 s += f"[VAL] time: {valid_time:.3f}"
                 print_fn(s)
@@ -361,56 +334,38 @@ def evaluate(model: nn.Module,
         raise ValueError("Either garg_crop or eigen_crop should be True")
     eval_mask = None
 
-    min_depth = opt["min_depth_eval"]
-    max_depth = opt["max_depth_eval"]
-    flip_eval = opt.get("flip_eval", False)
-
     torch.cuda.empty_cache()
     model.eval()
+
+    meter = compute_miou('./dataset/pascal/VOC_2012.json')
     with torch.no_grad():
         eval_stats = RunningAverage()  # loss
         eval_metrics = RunningAverageDict()  # metric
 
         for i, data in enumerate(eval_loader):
             image = data['image'].to(device, non_blocking=True)
-            gt_depth = data['depth'].to(device, non_blocking=True)
+            gt = data['gt'].to(device, non_blocking=True)
 
             model_output = model(image)
-            pred_depth = model_output[0]
-            pred_depth.clamp_(min_depth, max_depth)  # inplace
-            pred_depth.nan_to_num_(nan=min_depth, posinf=max_depth, neginf=0)  # inplace
+            pred = torch.argmax(model_output, dim=1)
 
-            # as a common practice, calculate metric can use the average of left-right
-            if flip_eval:
-                image_flip = torch.flip(image, [3])
-                pred_depth_flip = model(image_flip)[0]
-                pred_depth_flip = torch.flip(pred_depth_flip, [3])
-                pred_depth_flip.clamp_(min_depth, max_depth)
-                pred_depth_flip.nan_to_num_(nan=min_depth, posinf=max_depth, neginf=0)
-                pred_depth = 0.5 * (pred_depth + pred_depth_flip)
-
-            model_input = (image, gt_depth)
+            model_input = (image, gt)
             loss, loss_dict = criterion(model_input, model_output)
             loss_dict = all_reduce_dict(loss_dict, op="mean")
             eval_stats.append(loss_dict["loss"])
 
-            if eval_mask is None:
-                eval_mask = cal_eval_mask(opt, gt_depth, data_type=data_type)  # (h, w)
-
-            # ---- metric ---- #
-            pred = F.interpolate(pred_depth, gt_depth.shape[-2:], mode='bilinear', align_corners=True)  # (b, 1, h, w)
-
-            pred = pred.squeeze(1).cpu().numpy()  # (b, h, w)
-            gt = gt_depth.squeeze(1).cpu().numpy()  # (b, h, w)
-            valid_mask = np.logical_and(gt > min_depth, gt < max_depth)
-            valid_mask = np.logical_and(valid_mask, eval_mask)
-
             batch_size = image.shape[0]
             for j in range(batch_size):
-                eval_metrics.update(compute_errors(gt[j][valid_mask[j]], pred[j][valid_mask[j]]))
+                pred_mask = pred[j].cpu().detach().cnumpy()  # (b, h, w)
+                gt_mask = gt[j].cpu().detach().numpy()  # (b, h, w)
+
+                h, w = pred_mask.shape
+                gt_mask = cv2.resize(gt_mask, (w, h), interpolation=cv2.INTER_NEAREST)
+                meter.add(pred_mask, gt_mask)
 
         eval_metrics = eval_metrics.get_value()  # now this is dict
         eval_metrics = all_reduce_dict(eval_metrics, op="mean")
+        eval_metrics.update(meter.get(clear=True))
 
         return eval_stats.avg, eval_metrics
 

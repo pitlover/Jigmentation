@@ -1,18 +1,21 @@
+from typing import Optional
 import torch.distributed as dist
 from torch.utils.data.distributed import DistributedSampler
 from dataset.dataset import SegDataset
 from torch.utils.data.dataloader import DataLoader
-from loss import *
-from model import SeMask
+from model import RedSwinModel
+import loss
+import torch
+import torch.nn as nn
+from lr_scheduler import WarmupPolyLR
+from torch.optim import AdamW
 
 def build_model(opt: dict):
     # opt = opt["model"]
     model_type = opt["name"].lower()
 
-    if model_type == "semask":
-        model = SeMask.build(
-            opt
-        )
+    if model_type == "red":
+        model = RedSwinModel.build(opt)
     else:
         raise ValueError(f"Unsupported model type {model_type}.")
 
@@ -28,11 +31,19 @@ def build_model(opt: dict):
                 module.eps = bn_eps
     return model
 
+
 def build_criterion(opt: dict, dataset):
     # opt = opt BE CAREFUL!
     loss_type = opt["model"]['name'].lower()
     opt_loss = opt["loss"]
+    ignore_label = opt["dataset"]["ignore_label"]
 
+    if loss_type == "red":
+        criterion = loss.REDloss(opt_loss, ignore_label)
+    else:
+        raise ValueError(f"Unsupported model type {loss_type}.")
+
+    return criterion
 
 
 def split_params_for_optimizer(model, opt):
@@ -71,20 +82,37 @@ def split_params_for_optimizer(model, opt):
 def build_optimizer(params, opt: dict):
     # opt = opt["optimizer"]
     optimizer_type = opt.get("name", "adamw").lower()
+    if optimizer_type == "adamw":
+        optimizer = AdamW(
+            params,
+            lr=opt["lr"],
+            betas=tuple(opt.get("betas", (0.9, 0.99))),
+            weight_decay=opt["weight_decay"],
+            eps=opt.get("eps", 1e-8),
+        )
+    else:
+        raise ValueError(f"Unsupported model type {optimizer_type}.")
+    return optimizer
 
-
-
-
-def build_scheduler(opt: dict, optimizer, loader, start_epoch):
+def build_scheduler(opt: dict, optimizer, loader, max_iter, start_epoch):
     # opt = opt BE CAREFUL!
     scheduler_type = opt["scheduler"]['name'].lower()
+    max_lrs = [pg["lr"] for pg in optimizer.param_groups]
 
-    if scheduler_type == "onecycle":
-        max_lrs = [pg["lr"] for pg in optimizer.param_groups]
-
+    if scheduler_type == "poly":
+        scheduler = WarmupPolyLR(
+            optimizer=optimizer,
+            max_iters=max_iter,
+            warmup_factor=1,
+            warmup_iters=opt["scheduler"]["warmup_iter"],
+            warmup_method="linear",
+            last_epoch=start_epoch - 1,
+            power=0.9,
+            constant_ending=0.0,
+        )
+    elif scheduler_type == "onecycle":
         scheduler = torch.optim.lr_scheduler.OneCycleLR(  # noqa
             optimizer,
-            # max_lr=opt['optimizer']['lr'],
             max_lr=max_lrs,
             epochs=opt['train']['epoch'] + 1,
             steps_per_epoch=len(loader) // opt["train"]["num_accum"],
@@ -96,16 +124,9 @@ def build_scheduler(opt: dict, optimizer, loader, start_epoch):
             div_factor=opt["scheduler"]['div_factor'],
             final_div_factor=opt["scheduler"]['final_div_factor']
         )
-    elif scheduler_type == "linear":
-        scheduler = torch.optim.lr_scheduler.LinearLR(
-            optimizer,
-            start_factor=1.0,
-            end_factor=0.001,
-            total_iters=(len(loader) // opt["train"]["num_accum"]) * (opt["train"]["epoch"] + 1),
-            last_epoch=start_epoch - 1
-        )
+
     else:
-        raise ValueError(f"Unsupported scheduler type {scheduler_type}.")
+        raise ValueError(f"Unsupported model type {scheduler_type}.")
 
     return scheduler
 
@@ -118,6 +139,7 @@ def build_dataset(opt: dict, mode: str = "train"):
         mode=mode,
         img_size=opt["input_size"],
     )
+
 
 def build_dataloader(dataset,
                      opt: dict, shuffle: bool = True, pin_memory: bool = True,
