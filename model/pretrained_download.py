@@ -11,7 +11,7 @@ from os.path import join, exists
 import wget
 import os
 
-models_dir = join("./", "models")
+models_dir = join("./", "pretrained_models")
 os.makedirs(models_dir, exist_ok=True)
 model_url_root = "https://marhamilresearch4.blob.core.windows.net/stego-public/models/models/"
 model_names = ["moco_v2_800ep_pretrain.pth.tar",
@@ -38,3 +38,4 @@ for target_file, target_url in zip(target_files, target_urls):
         wget.download(target_url, target_file)
     else:
         print("\nFound {}, skipping download".format(target_file))
+
