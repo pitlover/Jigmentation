@@ -9,62 +9,31 @@
         "mode": "online"
     },
     "model": {
-        "name": "STEGO",
-        "bn_momentum": 0.1,
-        "bn_eps": 1.0e-3,
-        "encoder_type": "large",
-        "dec_dim": 512,
-        "num_heads": 8,
-        "num_repeats": 3,
-        "num_emb": 128,
-        "window_size": 8,
-        "drop_prob": 0.0,
-        "attn_drop_prob": 0.0,
-        "bias_type": "depth",
-        "neck_type": "red33"
+        "name": "STEGO"
+    },
+    "pretrained": {
+        "name": "dino",
+        "model_type": "vit_small",
+        "dino_patch_size": 8
     },
     "loss": {
-        "alpha": 10.0,
-        "beta": 0.15,
-        "per_image": true,
-        "si_weight": 1.0,
-        "sog_weight": 0.0,
-        "reduction_ratio": 8
     },
     "dataset": {
-        "data_type": "COCOstuff",
-        "data_path": "../Datasets/cocostuff",
-        "img_size": [352, 704],
-        "height_drop": [0.0, 0],
-        "width_drop": [0.0, 0],
-        "use_right": false
+        "data_type": "cocostuff27",
+        "data_path": "../Datasets/cocostuff27",
+        "crop_type": "center"
     },
     "dataloader": {
-        "batch_size": 8,
+        "batch_size": 16,
         "num_workers": 8
     },
     "optimizer": {
-        "lr": 0.0001,
-        "betas": [0.9, 0.999],
-        "weight_decay": 0.1,
-        "eps": 1.0e-6,
-        "same_lr": true
     },
     "scheduler": {
-        "name": "onecycle",
-        "pct_start": 0.25,
-        "div_factor": 25,
-        "final_div_factor": 100,
-        "cycle_momentum": false
     },
     "train": {
         "print_freq": 25,
-        "valid_freq": 250,
-        "epoch": 24,
-        "num_accum": 2,
-        "grad_norm": 0.1,
-        "freeze_encoder_bn": false,
-        "freeze_all_bn": -1
+        "valid_freq": 250
     },
     "eval": {
     }
