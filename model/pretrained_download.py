@@ -1,15 +1,24 @@
+'''
+@article{hamilton2022unsupervised,
+  title={Unsupervised Semantic Segmentation by Distilling Feature Correspondences},
+  author={Hamilton, Mark and Zhang, Zhoutong and Hariharan, Bharath and Snavely, Noah and Freeman, William T},
+  journal={arXiv preprint arXiv:2203.08414},
+  year={2022}
+}
+'''
+
 from os.path import join, exists
 import wget
 import os
 
-models_dir = join("../../Jigmentation", "models")
+models_dir = join("./", "models")
 os.makedirs(models_dir, exist_ok=True)
 model_url_root = "https://marhamilresearch4.blob.core.windows.net/stego-public/models/models/"
 model_names = ["moco_v2_800ep_pretrain.pth.tar",
                "model_epoch_0720_iter_085000.pth",
                "picie.pkl"]
 
-saved_models_dir = join("../../Jigmentation", "saved_models")
+saved_models_dir = join("./", "saved_models")
 os.makedirs(saved_models_dir, exist_ok=True)
 saved_model_url_root = "https://marhamilresearch4.blob.core.windows.net/stego-public/saved_models/"
 saved_model_names = ["cityscapes_vit_base_1.ckpt",
