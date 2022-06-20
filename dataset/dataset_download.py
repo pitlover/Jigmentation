@@ -1,3 +1,12 @@
+'''
+@article{hamilton2022unsupervised,
+  title={Unsupervised Semantic Segmentation by Distilling Feature Correspondences},
+  author={Hamilton, Mark and Zhang, Zhoutong and Hariharan, Bharath and Snavely, Noah and Freeman, William T},
+  journal={arXiv preprint arXiv:2203.08414},
+  year={2022}
+}
+'''
+
 import wget
 import os
 
