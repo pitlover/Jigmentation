@@ -14,14 +14,21 @@
     "pretrained": {
         "name": "dino",
         "model_type": "vit_small",
-        "dino_patch_size": 8
+        "dino_patch_size": 8,
+        "dino_feat_type" : "feat",
+        "pretrained_weights" : ~, # TODO yml  ~ same?,
+        "projection_type" : "nonlinear",
+        "dropout" : true
     },
     "loss": {
     },
     "dataset": {
         "data_type": "cocostuff27",
         "data_path": "../Datasets/cocostuff27",
-        "crop_type": "center"
+        "loader_crop_type" : "center",
+        "crop_type" : "five",
+        "crop_ratio": 0.5,
+        "res" : 224
     },
     "dataloader": {
         "batch_size": 16,

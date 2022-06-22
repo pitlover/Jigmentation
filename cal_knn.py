@@ -60,13 +60,13 @@ def main(opt: dict) -> None:
 
             if not os.path.exists(feature_cache_file):
                 print("{} not found, computing".format(feature_cache_file))
-                dataset = ContrastiveSegDataset(  # TODO need fix
+                dataset = ContrastiveSegDataset(
                     pytorch_data_dir=opt["dataset"]["data_path"],
                     dataset_name=dataset_name,
                     crop_type=crop_type,
                     image_set=image_set,
-                    transform=get_transform(res, False, opt["dataset"]["crop_type"]),
-                    target_transform=get_transform(res, True, opt["dataset"]["crop_type"]),
+                    transform=get_transform(res, False, opt["dataset"]["loader_crop_type"]),
+                    target_transform=get_transform(res, True, opt["dataset"]["loader_crop_type"]),
                     cfg=opt,
                 )
 

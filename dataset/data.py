@@ -445,10 +445,10 @@ class MaterializedDataset(Dataset):
 
 class ContrastiveSegDataset(Dataset):
     def __init__(self,
-                 pytorch_data_dir,
-                 dataset_name,
-                 crop_type,
-                 image_set,
+                 pytorch_data_dir : str,
+                 dataset_name : str,
+                 crop_type : str,
+                 image_set : str,
                  transform,
                  target_transform,
                  cfg,
@@ -502,8 +502,8 @@ class ContrastiveSegDataset(Dataset):
         elif dataset_name == "cocostuff27" and crop_type is not None:
             self.n_classes = 27
             dataset_class = CroppedDataset
-            extra_args = dict(dataset_name="cocostuff27", crop_type=cfg.crop_type, crop_ratio=cfg.crop_ratio)
-        elif dataset_name == "cocostuff" and crop_type is None:
+            extra_args = dict(dataset_name="cocostuff27", crop_type=cfg["dataset"]["crop_type"], crop_ratio=cfg["dataset"]["crop_ratio"])
+        elif dataset_name == "cocostuff27" and crop_type is None:
             self.n_classes = 27
             dataset_class = Coco
             extra_args = dict(coarse_labels=False, subset=None, exclude_things=False)
