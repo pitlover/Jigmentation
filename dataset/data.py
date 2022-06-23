@@ -447,7 +447,7 @@ class ContrastiveSegDataset(Dataset):
     def __init__(self,
                  pytorch_data_dir : str,
                  dataset_name : str,
-                 crop_type : str,
+                 crop_type,
                  image_set : str,
                  transform,
                  target_transform,
@@ -479,10 +479,6 @@ class ContrastiveSegDataset(Dataset):
             self.n_classes = 3
             dataset_class = PotsdamRaw
             extra_args = dict(coarse_labels=True)
-        elif dataset_name == "directory":
-            self.n_classes = cfg.dir_dataset_n_classes
-            dataset_class = DirectoryDataset
-            extra_args = dict(path=cfg.dir_dataset_name)
         elif dataset_name == "cityscapes" and crop_type is None:
             self.n_classes = 27
             dataset_class = CityscapesSeg
@@ -490,7 +486,7 @@ class ContrastiveSegDataset(Dataset):
         elif dataset_name == "cityscapes" and crop_type is not None:
             self.n_classes = 27
             dataset_class = CroppedDataset
-            extra_args = dict(dataset_name="cityscapes", crop_type=crop_type, crop_ratio=cfg.crop_ratio)
+            extra_args = dict(dataset_name="cityscapes", crop_type=crop_type, crop_ratio=cfg["crop_ratio"])
         elif dataset_name == "cocostuff3":
             self.n_classes = 3
             dataset_class = Coco
@@ -524,11 +520,11 @@ class ContrastiveSegDataset(Dataset):
         if model_type_override is not None:
             model_type = model_type_override
         else:
-            model_type = cfg.model_type
+            model_type = cfg["pretrained"]["model_type"]
 
         nice_dataset_name = cfg.dir_dataset_name if dataset_name == "directory" else dataset_name
         feature_cache_file = join("nns", "nns_{}_{}_{}_{}_{}.npz".format(
-            model_type, nice_dataset_name, image_set, crop_type, cfg.res))
+            model_type, nice_dataset_name, image_set, crop_type, cfg["dataset"]["res"]))
         if pos_labels or pos_images:
             if not os.path.exists(feature_cache_file) or compute_knns:
                 raise ValueError("could not find nn file {} please run precompute_knns".format(feature_cache_file))
@@ -590,3 +586,66 @@ class ContrastiveSegDataset(Dataset):
             ret["coord_aug"] = coord_aug.permute(1, 2, 0)
 
         return ret
+
+def get_class_labels(dataset_name):
+    if dataset_name.startswith("cityscapes"):
+        return [
+            'road', 'sidewalk', 'parking', 'rail track', 'building',
+            'wall', 'fence', 'guard rail', 'bridge', 'tunnel',
+            'pole', 'polegroup', 'traffic light', 'traffic sign', 'vegetation',
+            'terrain', 'sky', 'person', 'rider', 'car',
+            'truck', 'bus', 'caravan', 'trailer', 'train',
+            'motorcycle', 'bicycle']
+    elif dataset_name == "cocostuff27":
+        return [
+            "electronic", "appliance", "food", "furniture", "indoor",
+            "kitchen", "accessory", "animal", "outdoor", "person",
+            "sports", "vehicle", "ceiling", "floor", "food",
+            "furniture", "rawmaterial", "textile", "wall", "window",
+            "building", "ground", "plant", "sky", "solid",
+            "structural", "water"]
+    elif dataset_name == "voc":
+        return [
+            'background',
+            'aeroplane', 'bicycle', 'bird', 'boat', 'bottle',
+            'bus', 'car', 'cat', 'chair', 'cow',
+            'diningtable', 'dog', 'horse', 'motorbike', 'person',
+            'pottedplant', 'sheep', 'sofa', 'train', 'tvmonitor']
+    elif dataset_name == "potsdam":
+        return [
+            'roads and cars',
+            'buildings and clutter',
+            'trees and vegetation']
+    else:
+        raise ValueError("Unknown Dataset {}".format(dataset_name))
+
+def create_cityscapes_colormap():
+    colors = [(128, 64, 128),
+              (244, 35, 232),
+              (250, 170, 160),
+              (230, 150, 140),
+              (70, 70, 70),
+              (102, 102, 156),
+              (190, 153, 153),
+              (180, 165, 180),
+              (150, 100, 100),
+              (150, 120, 90),
+              (153, 153, 153),
+              (153, 153, 153),
+              (250, 170, 30),
+              (220, 220, 0),
+              (107, 142, 35),
+              (152, 251, 152),
+              (70, 130, 180),
+              (220, 20, 60),
+              (255, 0, 0),
+              (0, 0, 142),
+              (0, 0, 70),
+              (0, 60, 100),
+              (0, 0, 90),
+              (0, 0, 110),
+              (0, 80, 100),
+              (0, 0, 230),
+              (119, 11, 32),
+              (0, 0, 0)]
+    return np.array(colors)
