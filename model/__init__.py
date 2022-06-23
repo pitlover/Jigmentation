@@ -1,1 +1,0 @@
-from .RED import RedSwinModel

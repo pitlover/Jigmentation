@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-import dino.vision_transformer as vits
+import model.dino.vision_transformer as vits
 
 
 class DinoFeaturizer(nn.Module):
@@ -32,7 +32,7 @@ class DinoFeaturizer(nn.Module):
         else:
             raise ValueError("Unknown arch and patch size")
 
-        if cfg.pretrained_weights is not None:
+        if cfg["pretrained_weights"] is not None:
             state_dict = torch.load(cfg["pretrained_weights"], map_location="cpu")
             state_dict = state_dict["teacher"]
             # remove `module.` prefix

@@ -47,9 +47,9 @@ def main(opt: dict) -> None:
     n_batches = 16  # temp
 
     if opt["pretrained"]["name"] == "dino":
-        no_ap_model = build_model(opt["pretrained"], model_type, data_dir)
+        no_ap_model = build_model(opt["pretrained"], data_dir)
     else:
-        cut_model = build_model(opt["pretrained"], model_type, data_dir)
+        cut_model = build_model(opt["pretrained"], data_dir)
         no_ap_model = nn.Sequential(*list(cut_model.children())[:-1])
     par_model = torch.nn.DataParallel(no_ap_model.cuda())
 
@@ -77,7 +77,6 @@ def main(opt: dict) -> None:
                     normed_feats = get_feats(par_model, loader)
                     all_nns = []
                     step = normed_feats.shape[0] // n_batches
-                    print(normed_feats.shape)
                     for i in tqdm(range(0, normed_feats.shape[0], step)):
                         torch.cuda.empty_cache()
                         batch_feats = normed_feats[i:i + step, :]

@@ -2,8 +2,6 @@ from typing import Dict, Tuple
 import argparse
 from functools import partial
 
-import cv2
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F  # noqa
@@ -12,19 +10,36 @@ import torch.distributed as dist
 from torch.nn.parallel.distributed import DistributedDataParallel
 from torch.utils.data.dataloader import DataLoader
 import wandb
-
+import os
 from utils.common_utils import (save_checkpoint, parse, dprint, time_log, compute_param_norm,
                                 freeze_bn, zero_grad_bn, RunningAverage, RunningAverageDict, Timer)
-from utils.seg_utils import compute_miou
 from utils.dist_utils import all_reduce_dict
 from utils.wandb_utils import set_wandb
-
+from utils.seg_utils import UnsupervisedMetrics
+from dataset.data import (create_cityscapes_colormap, create_pascal_label_colormap)
 from build import (build_model, build_criterion, build_dataset, build_dataloader, build_scheduler,
                    split_params_for_optimizer, build_optimizer)
 
 
 def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
     is_train = (not is_test)
+
+    # -------------------- Folder Setup (Task-Specific) --------------------------#
+    data_dir = os.path.join(opt["output_dir"], "data")
+    log_dir = os.path.join(opt["output_dir"], "logs")
+    checkpoint_dir = os.path.join("./", "checkpoints")
+
+    prefix = "{}/{}_{}".format(opt["output_dir"], opt["dataset"]["data_type"], opt["wandb"]["name"])
+    opt["full_name"] = prefix
+
+    os.makedirs(data_dir, exist_ok=True)
+    os.makedirs(log_dir, exist_ok=True)
+    os.makedirs(checkpoint_dir, exist_ok=True)
+
+    if opt["dataset"]["data_type"].startswith("cityscapes"):
+        label_cmap = create_cityscapes_colormap()
+    else:
+        label_cmap = create_pascal_label_colormap()
 
     # -------------------- Distributed Setup --------------------------#
     if (opt["num_gpus"] == 0) or (not torch.cuda.is_available()):
@@ -62,24 +77,27 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
     val_loader = build_dataloader(val_dataset, opt["dataloader"], shuffle=False,
                                   batch_size=dist.get_world_size())
 
-    test_dataset = build_dataset(opt["dataset"], mode="test")
-    test_loader = build_dataloader(test_dataset, opt["dataloader"], shuffle=False,
-                                  batch_size=dist.get_world_size())
-
-    data_type = val_dataset.data_type
+    # test_dataset = build_dataset(opt["dataset"], mode="test")
+    # test_loader = build_dataloader(test_dataset, opt["dataloader"], shuffle=False,
+    #                                batch_size=dist.get_world_size())
 
     # -------------------------- Define -------------------------------#
-    model = build_model(opt["model"])  # CPU model
-    criterion = build_criterion(opt, val_dataset)  # CPU criterion
+    net_model, linear_model, cluster_model = build_model(opt=opt["model"],
+                                                         n_classes=train_dataset.n_classes)  # CPU model
+
+    criterion = build_criterion(train_dataset.n_classes,
+                                opt["loss"])  # CPU criterion
 
     device = torch.device("cuda", local_rank)  # "cuda:0" for single GPU
-    model = model.to(device)
+    net_model = net_model.to(device)
+    linear_model = linear_model.to(device)
+    cluster_model = cluster_model.to(device)
     criterion = criterion.to(device)
 
     # ----------------------- Distributed ----------------------------#
     if is_distributed:
         assert dist.is_available() and dist.is_initialized()
-        model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
+        model = nn.SyncBatchNorm.convert_sync_batchnorm(net_model)
         model = DistributedDataParallel(
             model.to(device),
             device_ids=[local_rank],
@@ -90,29 +108,33 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
         criterion = criterion.to(device)
         model_m = model.module  # unwrap DDP
     else:
-        model_m = model
+        model_m = net_model
 
     print_fn("Model:")
-    print_fn(model_m.decoder)
+    print_fn(model_m.net)
 
-    # ------------------- Optimizer & Scheduler -----------------------#
+    # ------------------- Optimizer  -----------------------#
     if is_train:
-        params_for_optimizer = split_params_for_optimizer(model_m, opt["optimizer"])
-        optimizer = build_optimizer(params_for_optimizer, opt["optimizer"])
+        net_optimizer, linear_probe_optimizer, cluster_probe_optimizer = build_optimizer(
+            main_params=model_m.parameters(),
+            linear_params=linear_model.parameters(),
+            cluster_params=cluster_model.parameters(),
+            opt=opt["optimizer"],
+            model_type=opt["wandb"]["name"])
     else:
-        optimizer = None
+        net_optimizer, linear_probe_optimizer, cluster_probe_optimizer = None, None, None
 
     # --------------------------- Load --------------------------------#
     if opt['checkpoint']:  # resume case
         checkpoint = torch.load(opt['checkpoint'], map_location=device)
-        try:
-            model_m.load_state_dict(checkpoint['model'], strict=True)
-        except KeyError:
-            model_m.load_state_dict(checkpoint['model_state_dict'], strict=True)
-        if "optimizer" in checkpoint.keys():
-            optimizer.load_state_dict(checkpoint['optimizer'])
-        elif "optimizer_state_dict" in checkpoint.keys():
-            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+
+        model_m.load_state_dict(checkpoint['net_model_state_dict'], strict=True)
+        linear_model.load_state_dict(checkpoint['linear_model_state_dict'], strict=True)
+        cluster_model.load_state_dict(checkpoint['cluster_model_state_dict'], strict=True)
+
+        net_optimizer.load_state_dict(checkpoint['net_optimizer_state_dict'])
+        linear_probe_optimizer.load_state_dict(checkpoint['linear_optimizer_state_dict'])
+        cluster_probe_optimizer.load_state_dict(checkpoint['cluster_optimizer_state_dict'])
 
         start_epoch = max(checkpoint.get('epoch', 0), 0)
         current_iter = max(checkpoint.get('iter', 0), 0)
@@ -128,21 +150,18 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
 
     # ------------------- Scheduler -----------------------#
     if is_train:
-        num_accum =opt["train"]["num_accum"]
-        max_iter = len(train_loader) * opt["dataloader"]["batch_size"]
-        scheduler = build_scheduler(opt, optimizer, train_loader, max_iter, start_epoch)
-        if start_epoch != 0:
-            scheduler.step(start_epoch + 1)
+        num_accum = opt["train"]["num_accum"]
     else:
         num_accum = 1
-        scheduler = None
 
     timer = Timer()
-    # --------------------------- Test --------------------------------#
+    # --------------------------- Test --------------------------------#  # TODO CRF, K-means
     if is_test:
         _ = timer.update()
         test_loss, test_metrics = evaluate(
-            model, val_loader, criterion, device=device, opt=opt["eval"], data_type=data_type)
+            net_model, linear_model, cluster_model,
+            val_loader, criterion,
+            device=device, opt=opt["eval"], n_classes=train_dataset.n_classes)
         test_time = timer.update()
 
         s = time_log()
@@ -162,17 +181,15 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
     print_freq = opt["train"]["print_freq"]
     valid_freq = opt["train"]["valid_freq"]
     grad_norm = opt["train"]["grad_norm"]
-    freeze_encoder_bn = opt["train"].get("freeze_encoder_bn", False)
-    freeze_all_bn = opt["train"].get("freeze_all_bn", -1)  # epoch
+    freeze_encoder_bn = opt["train"]["freeze_encoder_bn"]
+    freeze_all_bn = opt["train"]["freeze_all_bn"]  # epoch
 
-    for m in model.modules():
+    for m in net_model.modules():
         if isinstance(m, (nn.BatchNorm1d, nn.BatchNorm2d, nn.SyncBatchNorm)):
             m.momentum /= num_accum
 
-    best_valid_metrics = dict(mIOU=0, msmIOU=0)
+    best_valid_metrics = dict(mIOU=0, acc=0)
     train_stats = RunningAverage()  # track training loss per epoch
-
-    metric = "mIOU"
 
     for current_epoch in range(start_epoch, max_epoch):
         print_fn(f"-------- [{current_epoch}/{max_epoch} (iters: {current_iter})]--------")
@@ -181,27 +198,42 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
         if is_distributed:
             train_loader.sampler.set_epoch(current_epoch)  # noqa, necessary for DistributedSampler to be shuffled.
 
-        torch.cuda.empty_cache()
-        model.train()
+        net_model.train()
+        linear_model.train()
+        cluster_model.train()
+
         train_stats.reset()
         _ = timer.update()
-        for i, data in enumerate(train_loader):
-            image: torch.Tensor = data['image'].to(device, non_blocking=True)
-            gt: torch.Tensor = data['gt'].to(device, non_blocking=True)
+
+        for i, data in enumerate(train_loader):  ## here
+            img: torch.Tensor = data['img'].to(device, non_blocking=True)
+            img_pos: torch.Tensor = data['img_pos'].to(device, non_blocking=True)
+            label: torch.Tensor = data['label'].to(device, non_blocking=True)
             data_time = timer.update()
 
             if freeze_encoder_bn:
-                freeze_bn(model_m.encoder)
+                freeze_bn(model_m.model)
             if 0 < freeze_all_bn <= current_epoch:
-                freeze_bn(model)
+                freeze_bn(net_model)
 
-            batch_size = image.shape[0]
+            batch_size = img.shape[0]
             if i % num_accum == 0:
-                optimizer.zero_grad(set_to_none=True)
+                net_optimizer.zero_grad(set_to_none=True)
+                linear_probe_optimizer.zero_grad(set_to_none=True)
+                cluster_probe_optimizer.zero_grad(set_to_none=True)
 
-            model_input = (image, gt)
-            model_output = model(image)
-            loss, loss_dict = criterion(model_input, model_output)
+            model_input = (img, img_pos, label)
+            model_output = net_model(img)
+            detached_code = torch.clone(model_output[1].detach())
+            linear_output = linear_model(detached_code)
+            cluster_output = cluster_model(detached_code)  # cluster_loss, cluster_probs
+
+            if opt["loss"]["correspondence_weight"] > 0:
+                model_pos_output = net_model(img_pos)
+                loss, loss_dict = criterion(model_input, model_output, model_pos_output, linear_output, cluster_output)
+            else:
+                loss, loss_dict = criterion(model_input, model_output, linear_output, cluster_output)
+
             forward_time = timer.update()
 
             loss = loss / num_accum
@@ -209,13 +241,14 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
 
             if i % num_accum == (num_accum - 1):
                 if freeze_encoder_bn:
-                    zero_grad_bn(model_m.encoder)
+                    zero_grad_bn(model_m.net)
                 if 0 < freeze_all_bn <= current_epoch:
-                    zero_grad_bn(model)
+                    zero_grad_bn(net_model)
 
-                g_norm = nn.utils.clip_grad_norm_(model.parameters(), grad_norm)
-                optimizer.step()
-                scheduler.step()
+                g_norm = nn.utils.clip_grad_norm_(net_model.parameters(), grad_norm)
+                net_optimizer.step()
+                linear_probe_optimizer.step()
+                cluster_probe_optimizer.step()
                 current_iter += 1
 
             backward_time = timer.update()
@@ -224,8 +257,8 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
             train_stats.append(loss_dict["loss"])
 
             if i % print_freq == 0:
-                lrs = [int(pg["lr"] * 1e8) / 1e8 for pg in optimizer.param_groups]
-                p_norm = compute_param_norm(model.parameters())
+                lrs = [int(pg["lr"] * 1e8) / 1e8 for pg in net_optimizer.param_groups]
+                p_norm = compute_param_norm(net_model.parameters())
                 s = time_log()
                 s += f"epoch: {current_epoch}, iters: {current_iter} " \
                      f"({i} / {len(train_loader)} -th batch of loader)\n"
@@ -246,7 +279,7 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
                         "epoch": current_epoch,
                         "iters": current_iter,
                         "train_loss": loss_dict['loss'],
-                        "lr": optimizer.param_groups[0]['lr'],
+                        "lr": net_optimizer.param_groups[0]['lr'],
                         "param_norm": p_norm.item(),
                         "grad_norm": g_norm.item(),
                     })
@@ -255,7 +288,7 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
             if ((i + 1) % valid_freq == 0) or ((i + 1) == len(train_loader)):
                 _ = timer.update()
                 valid_loss, valid_metrics = evaluate(
-                    model, val_loader, criterion, device=device, opt=opt["eval"], data_type=data_type)
+                    net_model, linear_model, cluster_model, val_loader, criterion, device=device, opt=opt["eval"], n_classes=train_dataset.n_classes)
                 valid_time = timer.update()
 
                 s = time_log()
@@ -264,6 +297,7 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
                 s += f"[VAL] loss: {valid_loss:.6f}\n"
 
                 # update based on mIOU
+                metric = "cluster"
                 prev_best_metric = best_metric
                 if best_metric <= valid_metrics[metric]:
                     best_metric = valid_metrics[metric]
@@ -272,7 +306,7 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
                     s += f"[VAL] -------- updated ({metric})! {prev_best_metric:.6f} -> {best_metric:.6f}\n"
                     if is_master:
                         save_checkpoint(
-                            "best", model, optimizer,
+                            "best", net_model, net_optimizer, linear_model, linear_probe_optimizer, cluster_model, cluster_probe_optimizer,
                             current_epoch, current_iter, best_metric, wandb_save_dir, model_only=True)
                     for metric_k, metric_v in valid_metrics.items():
                         s += f"[VAL] {metric_k} : {best_valid_metrics[metric_k]:.6f} -> {metric_v:.6f}\n"
@@ -299,7 +333,7 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
 
         # --------------------------- Save --------------------------------#
         if is_master:
-            save_checkpoint("latest", model, optimizer,
+            save_checkpoint("latest", net_model, net_optimizer, linear_model, linear_probe_optimizer, cluster_model, cluster_probe_optimizer,
                             current_epoch, current_iter, best_metric, wandb_save_dir,
                             best_epoch=best_epoch, best_iter=best_iter, model_only=False)
 
@@ -308,7 +342,7 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
     # best_checkpoint = torch.load(f"{wandb_save_dir}/best.pth", map_location=device)
     # model_m.load_state_dict(best_checkpoint, strict=True)
     # best_loss, best_metrics = evaluate(
-    #     model, val_loader, criterion, device=device, opt=opt["eval"], data_type=data_type)
+    #     net_model, linear_model, cluster_model, val_loader, criterion, device=device, opt=opt["eval"], n_classes=train_dataset.n_classes)
     #
     # s = time_log()
     # s += f"[BEST] ---------------------------------------------\n"
@@ -323,49 +357,51 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
     print_fn(f"-------- Train Finished --------")
 
 
-def evaluate(model: nn.Module,
+def evaluate(net_model: nn.Module,
+             linear_model: nn.Module,
+             cluster_model: nn.Module,
              eval_loader: DataLoader,
              criterion: nn.Module,
              device: torch.device,
              opt: Dict,
-             data_type: str) -> Tuple[float, Dict[str, float]]:  # noqa
+             n_classes: int,
+             ) -> Tuple[float, Dict[str, float]]:  # noqa
     # opt = opt["eval"]
-    if not (opt["garg_crop"] != opt["eigen_crop"]):
-        raise ValueError("Either garg_crop or eigen_crop should be True")
-    eval_mask = None
 
     torch.cuda.empty_cache()
-    model.eval()
+    net_model.eval()
+    linear_model.eval()
+    cluster_model.eval()
 
-    meter = compute_miou('./dataset/pascal/VOC_2012.json')
+    cluster_metrics = UnsupervisedMetrics(
+        "test/cluster/", n_classes, opt["extra_clusters"], True)
+    linear_metrics = UnsupervisedMetrics(
+        "test/linear/", n_classes, 0, False)
+
     with torch.no_grad():
         eval_stats = RunningAverage()  # loss
         eval_metrics = RunningAverageDict()  # metric
 
         for i, data in enumerate(eval_loader):
-            image = data['image'].to(device, non_blocking=True)
-            gt = data['gt'].to(device, non_blocking=True)
+            img: torch.Tensor = data['img'].to(device, non_blocking=True)
+            label: torch.Tensor = data['label'].to(device, non_blocking=True)
 
-            model_output = model(image)
-            pred = torch.argmax(model_output, dim=1)
+            feats, code = net_model(img)
+            code = F.interpolate(code, label.shape[-2:], mode='bilinear', align_corners=False)
 
-            model_input = (image, gt)
-            loss, loss_dict = criterion(model_input, model_output)
-            loss_dict = all_reduce_dict(loss_dict, op="mean")
-            eval_stats.append(loss_dict["loss"])
+            linear_preds = linear_model(code)
+            linear_preds = linear_preds.argmax(1)
+            linear_metrics.update(linear_preds, label)
 
-            batch_size = image.shape[0]
-            for j in range(batch_size):
-                pred_mask = pred[j].cpu().detach().cnumpy()  # (b, h, w)
-                gt_mask = gt[j].cpu().detach().numpy()  # (b, h, w)
+            cluster_loss, cluster_preds = cluster_model(code, None)
+            cluster_preds = cluster_preds.argmax(1)
+            cluster_metrics.update(cluster_preds, label)
 
-                h, w = pred_mask.shape
-                gt_mask = cv2.resize(gt_mask, (w, h), interpolation=cv2.INTER_NEAREST)
-                meter.add(pred_mask, gt_mask)
+            eval_stats.append(cluster_loss)
 
+        eval_metrics = eval_metrics.update({"linear": linear_metrics.compute(), "cluster": cluster_metrics.compute()})
         eval_metrics = eval_metrics.get_value()  # now this is dict
         eval_metrics = all_reduce_dict(eval_metrics, op="mean")
-        eval_metrics.update(meter.get(clear=True))
 
         return eval_stats.avg, eval_metrics
 

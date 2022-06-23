@@ -1,96 +1,70 @@
-from typing import Optional
+from typing import Optional, Dict
 import torch
-from os.path import join
-from torchvision import models
-import wget
-import os
 import torch.nn as nn
-from torch.optim import AdamW
+from torch.optim import Adam
 import torch.distributed as dist
 from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data.dataloader import DataLoader
-from model import DinoFeaturizer, LambdaLayer
+from model import STEGO
+from model.LambdaLayer import LambdaLayer
+from model.dino.DinoFeaturizer import DinoFeaturizer
+from dataset.data import ContrastiveSegDataset, get_transform
+from torchvision import transforms as T
+from loss import (StegoLoss)
 
-def build_model(opt: dict, data_dir: str):
+
+def build_criterion(n_classes: int, opt: Dict):
+    # opt = opt["loss"]
+    loss_name = opt["name"].lower()
+    if loss_name == "stego":
+        loss = StegoLoss(n_classes=n_classes,
+                         cfg=opt["corr_loss"],
+                         corr_weight=opt["correspondence_weight"]
+                         )
+    else:
+        raise ValueError(f"Unsupported loss type {loss_name}")
+
+    return loss
+
+
+def build_model(opt: dict, n_classes: int = 27):
     # opt = opt["model"]  //   opt["pretrained"]
     model_type = opt["name"].lower()
 
-    if model_type == "dino":
+    if model_type == "stego":
+        model = STEGO.build(
+            opt=opt,
+            n_classes=n_classes
+        )
+        model = model.net
+        linear_model = model.linear_probe
+        cluster_model = model.cluster_probe
+
+    elif model_type == "dino":
         model = nn.Sequential(
-            DinoFeaturizer(20, opt),  # dim doesent matter
+            DinoFeaturizer(20, opt),  # dim doesnt matter
             LambdaLayer(lambda p: p[0])
         )
 
-    elif model_type == "robust_resnet50":
-        model = models.resnet50(pretrained=False)
-        model_file = join(data_dir, 'imagenet_l2_3_0.pt')
-        if not os.path.exists(model_file):
-            wget.download("http://6.869.csail.mit.edu/fa19/psets19/pset6/imagenet_l2_3_0.pt",
-                          model_file)
-        model_weights = torch.load(model_file)
-        model_weights_modified = {name.split('model.')[1]: value for name, value in model_weights['model'].items() if
-                                  'model' in name}
-        model.load_state_dict(model_weights_modified)
-        model = nn.Sequential(*list(model.children())[:-1])
-    elif model_type == "densecl":
-        model = models.resnet50(pretrained=False)
-        model_file = join(data_dir, 'densecl_r50_coco_1600ep.pth')
-        if not os.path.exists(model_file):
-            wget.download("https://cloudstor.aarnet.edu.au/plus/s/3GapXiWuVAzdKwJ/download",
-                          model_file)
-        model_weights = torch.load(model_file)
-        # model_weights_modified = {name.split('model.')[1]: value for name, value in model_weights['model'].items() if
-        #                          'model' in name}
-        model.load_state_dict(model_weights['state_dict'], strict=False)
-        model = nn.Sequential(*list(model.children())[:-1])
-    elif model_type == "resnet50":
-        model = models.resnet50(pretrained=True)
-        model = nn.Sequential(*list(model.children())[:-1])
-    elif model_type == "mocov2":
-        model = models.resnet50(pretrained=False)
-        model_file = join(data_dir, 'moco_v2_800ep_pretrain.pth.tar')
-        if not os.path.exists(model_file):
-            wget.download("https://dl.fbaipublicfiles.com/moco/moco_checkpoints/"
-                          "moco_v2_800ep/moco_v2_800ep_pretrain.pth.tar", model_file)
-        checkpoint = torch.load(model_file)
-        # rename moco pre-trained keys
-        state_dict = checkpoint['state_dict']
-        for k in list(state_dict.keys()):
-            # retain only encoder_q up to before the embedding layer
-            if k.startswith('module.encoder_q') and not k.startswith('module.encoder_q.fc'):
-                # remove prefix
-                state_dict[k[len("module.encoder_q."):]] = state_dict[k]
-            # delete renamed or unused k
-            del state_dict[k]
-        msg = model.load_state_dict(state_dict, strict=False)
-        assert set(msg.missing_keys) == {"fc.weight", "fc.bias"}
-        model = nn.Sequential(*list(model.children())[:-1])
-    elif model_type == "densenet121":
-        model = models.densenet121(pretrained=True)
-        model = nn.Sequential(*list(model.children())[:-1] + [nn.AdaptiveAvgPool2d((1, 1))])
-    elif model_type == "vgg11":
-        model = models.vgg11(pretrained=True)
-        model = nn.Sequential(*list(model.children())[:-1] + [nn.AdaptiveAvgPool2d((1, 1))])
     else:
         raise ValueError("No model: {} found".format(model_type))
 
-    if model_type != "dino":
-        model.eval()
-        model.cuda()
+    bn_momentum = opt.get("bn_momentum", None)
+    if bn_momentum is not None:
+        for module_name, module in model.named_modules():
+            if isinstance(module, (nn.BatchNorm1d, nn.BatchNorm2d, nn.SyncBatchNorm)):
+                module.momentum = bn_momentum
 
-    else:
-        bn_momentum = opt.get("bn_momentum", None)
-        if bn_momentum is not None:
-            for module_name, module in model.named_modules():
-                if isinstance(module, (nn.BatchNorm1d, nn.BatchNorm2d, nn.SyncBatchNorm)):
-                    module.momentum = bn_momentum
-        bn_eps = opt.get("bn_eps", None)
-        if bn_eps is not None:
-            for module_name, module in model.named_modules():
-                if isinstance(module, (nn.BatchNorm1d, nn.BatchNorm2d, nn.SyncBatchNorm)):
-                    module.eps = bn_eps
+    bn_eps = opt.get("bn_eps", None)
+    if bn_eps is not None:
+        for module_name, module in model.named_modules():
+            if isinstance(module, (nn.BatchNorm1d, nn.BatchNorm2d, nn.SyncBatchNorm)):
+                module.eps = bn_eps
 
-    return model
+    if model_type == "stego":
+        return model, linear_model, cluster_model
+    elif model_type == "dino":
+        return model
 
 
 def split_params_for_optimizer(model, opt):
@@ -126,22 +100,36 @@ def split_params_for_optimizer(model, opt):
     return params_for_optimizer
 
 
-def build_optimizer(params, opt: dict):
+def build_optimizer(main_params, linear_params, cluster_params, opt: dict, model_type: str):
     # opt = opt["optimizer"]
-    optimizer_type = opt.get("name", "adamw").lower()
+    model_type = model_type.lower()
 
-    if optimizer_type == "adamw":
-        optimizer = AdamW(
-            params,
-            lr=opt["lr"],
-            betas=tuple(opt.get("betas", (0.9, 0.99))),
-            weight_decay=opt["weight_decay"],
-            eps=opt.get("eps", 1e-8),
-        )
+    if model_type == "stego":
+        net_optimizer_type = opt["net"]["name"].lower()
+        if net_optimizer_type == "adam":
+            net_optimizer = Adam(
+                main_params,
+                lr=opt["net"]["lr"]
+            )
+        else:
+            raise ValueError(f"Unsupported optimizer type {net_optimizer_type}.")
+
+        linear_probe_optimizer_type = opt["linear"]["name"].lower()
+        if linear_probe_optimizer_type == "adam":
+            linear_probe_optimizer = Adam(linear_params, lr=opt["linear"]["lr"])
+        else:
+            raise ValueError(f"Unsupported optimizer type {linear_probe_optimizer_type}.")
+
+        cluster_probe_optimizer_type = opt["cluster"]["name"].lower()
+        if cluster_probe_optimizer_type == "adam":
+            cluster_probe_optimizer_type = Adam(cluster_params, lr=opt["cluster"]["lr"])
+        else:
+            raise ValueError(f"Unsupported optimizer type {cluster_probe_optimizer_type}.")
+
+        return net_optimizer, linear_probe_optimizer, cluster_probe_optimizer_type
+
     else:
-        raise ValueError(f"Unsupported optimizer type {optimizer_type}.")
-
-    return optimizer
+        raise ValueError("No model: {} found".format(model_type))
 
 
 def build_scheduler(opt: dict, optimizer, loader, start_epoch):
@@ -171,19 +159,52 @@ def build_scheduler(opt: dict, optimizer, loader, start_epoch):
     return scheduler
 
 
-def build_dataset(opt: dict, mode: str = "train"):
+def build_dataset(opt: dict, mode: str = "train") -> ContrastiveSegDataset:
     # opt = opt["dataset"]
-    return DepthDataset( # TODO dataset
-        data_path=opt["data_path"],
-        data_type=opt["data_type"],
-        mode=mode,
-        img_size=opt.get("img_size", None),
-        height_drop=opt.get("height_drop", (0.0, 0)),
-        width_drop=opt.get("width_drop", (0.0, 0)),
-        use_right=opt.get("use_right", False),
-        drop_edge=opt.get("drop_edge", False),
-        clip_depth=opt.get("clip_depth", None),
-    )
+    data_type = opt["data_type"].lower()
+
+    if mode == "train":
+        geometric_transforms = T.Compose([
+            T.RandomHorizontalFlip(),
+            T.RandomResizedCrop(size=opt["res"], scale=(0.8, 1.0))
+        ])
+        photometric_transforms = T.Compose([
+            T.ColorJitter(brightness=.3, contrast=.3, saturation=.3, hue=.1),
+            T.RandomGrayscale(.2),
+            T.RandomApply([T.GaussianBlur((5, 5))])
+        ])
+
+        return ContrastiveSegDataset(
+            pytorch_data_dir=opt["data_path"],
+            dataset_name=opt["data_type"],
+            crop_type=opt["crop_type"],
+            image_set=mode,
+            transform=get_transform(opt["res"], False, opt["loader_crop_type"]),
+            target_transform=get_transform(opt["res"], True, opt["loader_crop_type"]),
+            cfg=opt,
+            aug_geometric_transform=geometric_transforms,
+            aug_photometric_transform=photometric_transforms,
+            num_neighbors=opt["num_neighbors"],
+            mask=True,
+            pos_images=True,
+            pos_labels=True
+        )
+    elif mode == "val":
+        if data_type == "voc":
+            val_loader_crop = None
+        else:
+            val_loader_crop = "center"
+
+        return ContrastiveSegDataset(
+            pytorch_data_dir=opt["data_path"],
+            dataset_name=opt["data_type"],
+            crop_type=None,
+            image_set="val",
+            transform=get_transform(320, False, val_loader_crop),
+            target_transform=get_transform(320, True, val_loader_crop),
+            mask=True,
+            cfg=opt,
+        )
 
 
 def build_dataloader(dataset,
