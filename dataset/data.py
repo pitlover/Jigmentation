@@ -447,7 +447,8 @@ class ContrastiveSegDataset(Dataset):
     def __init__(self,
                  pytorch_data_dir : str,
                  dataset_name : str,
-                 crop_type,
+                 crop_type : str,
+                 model_type : str,
                  image_set : str,
                  transform,
                  target_transform,
@@ -470,7 +471,7 @@ class ContrastiveSegDataset(Dataset):
         self.pos_labels = pos_labels
         self.pos_images = pos_images
         self.extra_transform = extra_transform
-
+        self.model_type = model_type
         if dataset_name == "potsdam":
             self.n_classes = 3
             dataset_class = Potsdam
@@ -498,7 +499,7 @@ class ContrastiveSegDataset(Dataset):
         elif dataset_name == "cocostuff27" and crop_type is not None:
             self.n_classes = 27
             dataset_class = CroppedDataset
-            extra_args = dict(dataset_name="cocostuff27", crop_type=cfg["dataset"]["crop_type"], crop_ratio=cfg["dataset"]["crop_ratio"])
+            extra_args = dict(dataset_name="cocostuff27", crop_type=cfg["crop_type"], crop_ratio=cfg["crop_ratio"])
         elif dataset_name == "cocostuff27" and crop_type is None:
             self.n_classes = 27
             dataset_class = Coco
@@ -520,11 +521,11 @@ class ContrastiveSegDataset(Dataset):
         if model_type_override is not None:
             model_type = model_type_override
         else:
-            model_type = cfg["pretrained"]["model_type"]
+            model_type = self.model_type
 
         nice_dataset_name = cfg.dir_dataset_name if dataset_name == "directory" else dataset_name
         feature_cache_file = join("nns", "nns_{}_{}_{}_{}_{}.npz".format(
-            model_type, nice_dataset_name, image_set, crop_type, cfg["dataset"]["res"]))
+            model_type, nice_dataset_name, image_set, crop_type, cfg["res"]))
         if pos_labels or pos_images:
             if not os.path.exists(feature_cache_file) or compute_knns:
                 raise ValueError("could not find nn file {} please run precompute_knns".format(feature_cache_file))
@@ -551,7 +552,7 @@ class ContrastiveSegDataset(Dataset):
 
         self._set_seed(seed)
         coord_entries = torch.meshgrid([torch.linspace(-1, 1, pack[0].shape[1]),
-                                        torch.linspace(-1, 1, pack[0].shape[2])])
+                                        torch.linspace(-1, 1, pack[0].shape[2])], indexing = "ij")
         coord = torch.cat([t.unsqueeze(0) for t in coord_entries], 0)
 
         if self.extra_transform is not None:

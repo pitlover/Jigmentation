@@ -1,42 +1,26 @@
 from typing import Optional, Dict
-import torch
-import torch.nn as nn
 from torch.optim import Adam
 import torch.distributed as dist
 from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data.dataloader import DataLoader
-from model import STEGO
+from model.STEGO import STEGOmodel
 from model.LambdaLayer import LambdaLayer
 from model.dino.DinoFeaturizer import DinoFeaturizer
 from dataset.data import ContrastiveSegDataset, get_transform
 from torchvision import transforms as T
-from loss import (StegoLoss)
-
-
-def build_criterion(n_classes: int, opt: Dict):
-    # opt = opt["loss"]
-    loss_name = opt["name"].lower()
-    if loss_name == "stego":
-        loss = StegoLoss(n_classes=n_classes,
-                         cfg=opt["corr_loss"],
-                         corr_weight=opt["correspondence_weight"]
-                         )
-    else:
-        raise ValueError(f"Unsupported loss type {loss_name}")
-
-    return loss
+from loss import *
 
 
 def build_model(opt: dict, n_classes: int = 27):
-    # opt = opt["model"]  //   opt["pretrained"]
+    # opt = opt["model"]
     model_type = opt["name"].lower()
 
-    if model_type == "stego":
-        model = STEGO.build(
+    if "stego" in model_type:
+        model = STEGOmodel.build(
             opt=opt,
             n_classes=n_classes
         )
-        model = model.net
+        net_model = model.net
         linear_model = model.linear_probe
         cluster_model = model.cluster_probe
 
@@ -61,10 +45,22 @@ def build_model(opt: dict, n_classes: int = 27):
             if isinstance(module, (nn.BatchNorm1d, nn.BatchNorm2d, nn.SyncBatchNorm)):
                 module.eps = bn_eps
 
-    if model_type == "stego":
-        return model, linear_model, cluster_model
+    if "stego" in model_type:
+        return net_model, linear_model, cluster_model
     elif model_type == "dino":
         return model
+
+
+def build_criterion(n_classes: int, opt: dict):
+    # opt = opt["loss"]
+    loss_name = opt["name"].lower()
+    if "stego" in loss_name:
+        loss = StegoLoss(n_classes=n_classes, cfg=opt, corr_weight=opt["correspondence_weight"])
+    else:
+        raise ValueError(f"Unsupported loss type {loss_name}")
+
+    return loss
+
 
 
 def split_params_for_optimizer(model, opt):
@@ -104,7 +100,7 @@ def build_optimizer(main_params, linear_params, cluster_params, opt: dict, model
     # opt = opt["optimizer"]
     model_type = model_type.lower()
 
-    if model_type == "stego":
+    if "stego" in model_type:
         net_optimizer_type = opt["net"]["name"].lower()
         if net_optimizer_type == "adam":
             net_optimizer = Adam(
@@ -159,7 +155,7 @@ def build_scheduler(opt: dict, optimizer, loader, start_epoch):
     return scheduler
 
 
-def build_dataset(opt: dict, mode: str = "train") -> ContrastiveSegDataset:
+def build_dataset(opt: dict, mode: str = "train", model_type: str = "dino") -> ContrastiveSegDataset:
     # opt = opt["dataset"]
     data_type = opt["data_type"].lower()
 
@@ -178,6 +174,7 @@ def build_dataset(opt: dict, mode: str = "train") -> ContrastiveSegDataset:
             pytorch_data_dir=opt["data_path"],
             dataset_name=opt["data_type"],
             crop_type=opt["crop_type"],
+            model_type=model_type,
             image_set=mode,
             transform=get_transform(opt["res"], False, opt["loader_crop_type"]),
             target_transform=get_transform(opt["res"], True, opt["loader_crop_type"]),
@@ -199,6 +196,7 @@ def build_dataset(opt: dict, mode: str = "train") -> ContrastiveSegDataset:
             pytorch_data_dir=opt["data_path"],
             dataset_name=opt["data_type"],
             crop_type=None,
+            model_type=model_type,
             image_set="val",
             transform=get_transform(320, False, val_loader_crop),
             target_transform=get_transform(320, True, val_loader_crop),

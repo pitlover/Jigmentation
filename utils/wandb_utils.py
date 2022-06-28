@@ -10,7 +10,7 @@ def set_wandb(opt: Dict, local_rank: int = 0, force_mode: Optional[str] = None) 
         return ""
 
     # opt = opt
-    save_dir = opt["output_dir"]  # root save dir
+    save_dir = os.path.join(opt["output_dir"], opt["wandb"]["name"]) # root save dir
 
     wandb_mode = opt["wandb"]["mode"].lower()
     if force_mode is not None:

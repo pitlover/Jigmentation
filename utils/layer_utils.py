@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-class ClusterLookup(nn.Module):  # TODO look for cluster
+class ClusterLookup(nn.Module):
 
     def __init__(self, dim: int, n_classes: int):
         super(ClusterLookup, self).__init__()
@@ -15,11 +15,10 @@ class ClusterLookup(nn.Module):  # TODO look for cluster
         with torch.no_grad():
             self.clusters.copy_(torch.randn(self.n_classes, self.dim))
 
-    def forward(self, x, alpha, log_probs=False):
+    def forward(self, x, alpha, log_probs=False): # feats, code
         normed_clusters = F.normalize(self.clusters, dim=1)
         normed_features = F.normalize(x, dim=1)
         inner_products = torch.einsum("bchw,nc->bnhw", normed_features, normed_clusters)
-        print("inner_products = ", inner_products.shape)
 
         if alpha is None:
             cluster_probs = F.one_hot(torch.argmax(inner_products, dim=1), self.clusters.shape[0]) \

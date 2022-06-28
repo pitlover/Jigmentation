@@ -9,10 +9,10 @@ class DinoFeaturizer(nn.Module):
         super().__init__()
         self.cfg = cfg
         self.dim = dim
-        patch_size = self.cfg["dino_patch_size"]
+        patch_size = self.cfg["pretrained"]["dino_patch_size"]
         self.patch_size = patch_size
-        self.feat_type = self.cfg["dino_feat_type"]
-        arch = self.cfg["model_type"]
+        self.feat_type = self.cfg["pretrained"]["dino_feat_type"]
+        arch = self.cfg["pretrained"]["model_type"]
         self.model = vits.__dict__[arch](
             patch_size=patch_size,
             num_classes=0)
@@ -32,8 +32,8 @@ class DinoFeaturizer(nn.Module):
         else:
             raise ValueError("Unknown arch and patch size")
 
-        if cfg["pretrained_weights"] is not None:
-            state_dict = torch.load(cfg["pretrained_weights"], map_location="cpu")
+        if cfg["pretrained"]["pretrained_weights"] is not None:
+            state_dict = torch.load(cfg["pretrained"]["pretrained_weights"], map_location="cpu")
             state_dict = state_dict["teacher"]
             # remove `module.` prefix
             state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
@@ -41,7 +41,7 @@ class DinoFeaturizer(nn.Module):
             state_dict = {k.replace("backbone.", ""): v for k, v in state_dict.items()}
 
             msg = self.model.load_state_dict(state_dict, strict=False)
-            print('Pretrained weights found at {} and loaded with msg: {}'.format(cfg["pretrained_weights"], msg))
+            print('Pretrained weights found at {} and loaded with msg: {}'.format(cfg["pretrained"]["pretrained_weights"], msg))
         else:
             print("Since no pretrained weights have been provided, we load the reference pretrained DINO weights.")
             state_dict = torch.hub.load_state_dict_from_url(url="https://dl.fbaipublicfiles.com/dino/" + url)
@@ -52,7 +52,7 @@ class DinoFeaturizer(nn.Module):
         else:
             self.n_feats = 768
         self.cluster1 = self.make_clusterer(self.n_feats)
-        self.proj_type = cfg["projection_type"]
+        self.proj_type = cfg["pretrained"]["projection_type"]
         if self.proj_type == "nonlinear":
             self.cluster2 = self.make_nonlinear_clusterer(self.n_feats)
 
@@ -98,7 +98,7 @@ class DinoFeaturizer(nn.Module):
         else:
             code = image_feat
 
-        if self.cfg["dropout"]:
+        if self.cfg["pretrained"]["dropout"]:
             return self.dropout(image_feat), code
         else:
             return image_feat, code

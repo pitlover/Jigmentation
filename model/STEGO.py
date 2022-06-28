@@ -15,6 +15,7 @@ class STEGOmodel(nn.Module):
         self.opt = opt
         self.n_classes= n_classes
 
+
         if not opt["continuous"]:
             dim = n_classes
         else:
