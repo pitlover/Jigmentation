@@ -17,10 +17,12 @@ from utils.wandb_utils import set_wandb
 from utils.seg_utils import UnsupervisedMetrics, batched_crf, get_metrics
 from dataset.data import (create_cityscapes_colormap, create_pascal_label_colormap)
 from build import (build_model, build_criterion, build_dataset, build_dataloader, build_optimizer)
+from pytorch_lightning.utilities.seed import seed_everything
 
 
 def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
     is_train = (not is_test)
+    seed_everything(seed=10)
 
     # -------------------- Folder Setup (Task-Specific) --------------------------#
     data_dir = os.path.join(opt["output_dir"], "data")
@@ -75,6 +77,7 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
     val_dataset = build_dataset(opt["dataset"], mode="val", model_type=opt["model"]["pretrained"]["model_type"])
     val_loader = build_dataloader(val_dataset, opt["dataloader"], shuffle=False,
                                   batch_size=world_size)
+                                  # batch_size=opt["dataloader"]["batch_size"])
 
     # test_dataset = build_dataset(opt["dataset"], mode="test")
     # test_loader = build_dataloader(test_dataset, opt["dataloader"], shuffle=False,
@@ -341,7 +344,6 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
                     valid_metrics.update({"iters": current_iter, "valid_loss": valid_loss})
                     wandb.log(valid_metrics)
 
-                torch.cuda.empty_cache()
                 net_model.train()
                 linear_model.train()
                 cluster_model.train()
@@ -407,7 +409,6 @@ def evaluate(net_model: nn.Module,
              ) -> Tuple[float, Dict[str, float]]:  # noqa
     # opt = opt["eval"]
 
-    torch.cuda.empty_cache()
     net_model.eval()
 
     cluster_metrics = UnsupervisedMetrics(
@@ -425,14 +426,14 @@ def evaluate(net_model: nn.Module,
             feats, code = net_model(img)
             code = F.interpolate(code, label.shape[-2:], mode='bilinear', align_corners=False)
 
-            linear_preds = torch.log_softmax(linear_model(code), dim=1)
-            cluster_loss, cluster_preds = cluster_model(code, 2, log_probs=True)
-
             if is_crf:
+                linear_preds = torch.log_softmax(linear_model(code), dim=1)
+                cluster_loss, cluster_preds = cluster_model(code, 2, log_probs=True)
                 linear_preds = batched_crf(img, linear_preds).argmax(1).cuda()
                 cluster_preds = batched_crf(img, cluster_preds).argmax(1).cuda()
             else:
-                linear_preds = linear_preds.argmax(1)
+                linear_preds = linear_model(code).argmax(1)
+                cluster_loss, cluster_preds = cluster_model(code, None)
                 cluster_preds = cluster_preds.argmax(1)
 
             linear_metrics.update(linear_preds, label)

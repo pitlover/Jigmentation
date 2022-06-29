@@ -86,7 +86,7 @@ class ContrastiveCorrelationLoss(nn.Module):  # TODO need to analysis
         else:
             min_val = -9999.0
 
-        if self.cfg["stabalize"]:
+        if self.cfg["stabilize"]:
             loss = - cd.clamp(min_val, .8) * (fd - shift)
         else:
             loss = - cd.clamp(min_val) * (fd - shift)
@@ -94,8 +94,10 @@ class ContrastiveCorrelationLoss(nn.Module):  # TODO need to analysis
         return loss, cd
 
     def forward(self,
-                orig_feats: torch.Tensor, orig_feats_pos: torch.Tensor,
-                orig_code: torch.Tensor, orig_code_pos: torch.Tensor,
+                orig_feats: torch.Tensor,
+                orig_feats_pos: torch.Tensor,
+                orig_code: torch.Tensor,
+                orig_code_pos: torch.Tensor,
                 ):
 
         coord_shape = [orig_feats.shape[0], self.cfg["feature_samples"], self.cfg["feature_samples"], 2]

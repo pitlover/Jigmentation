@@ -24,6 +24,26 @@ def build_model(opt: dict, n_classes: int = 27):
         linear_model = model.linear_probe
         cluster_model = model.cluster_probe
 
+        '''
+        net_params_no_grad = 0
+        net_params_grad = 0
+        for p in net_model.parameters():
+            if p.requires_grad:
+                net_params_grad += p.numel()
+            else:
+                net_params_no_grad += p.numel()
+
+        linear_params = 0
+        for p in linear_model.parameters():
+            linear_params += p.numel()
+
+        cluster_params = 0
+        for p in cluster_model.parameters():
+            cluster_params += p.numel()
+        
+        '''
+
+
     elif model_type == "dino":
         model = nn.Sequential(
             DinoFeaturizer(20, opt),  # dim doesnt matter
@@ -103,10 +123,7 @@ def build_optimizer(main_params, linear_params, cluster_params, opt: dict, model
     if "stego" in model_type:
         net_optimizer_type = opt["net"]["name"].lower()
         if net_optimizer_type == "adam":
-            net_optimizer = Adam(
-                main_params,
-                lr=opt["net"]["lr"]
-            )
+            net_optimizer = Adam(main_params, lr=opt["net"]["lr"])
         else:
             raise ValueError(f"Unsupported optimizer type {net_optimizer_type}.")
 
@@ -118,11 +135,11 @@ def build_optimizer(main_params, linear_params, cluster_params, opt: dict, model
 
         cluster_probe_optimizer_type = opt["cluster"]["name"].lower()
         if cluster_probe_optimizer_type == "adam":
-            cluster_probe_optimizer_type = Adam(cluster_params, lr=opt["cluster"]["lr"])
+            cluster_probe_optimizer = Adam(cluster_params, lr=opt["cluster"]["lr"])
         else:
             raise ValueError(f"Unsupported optimizer type {cluster_probe_optimizer_type}.")
 
-        return net_optimizer, linear_probe_optimizer, cluster_probe_optimizer_type
+        return net_optimizer, linear_probe_optimizer, cluster_probe_optimizer
 
     else:
         raise ValueError("No model: {} found".format(model_type))

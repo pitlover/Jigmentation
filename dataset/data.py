@@ -13,6 +13,7 @@ from torchvision.datasets.cityscapes import Cityscapes
 from torchvision.transforms.functional import to_pil_image
 from tqdm import tqdm
 
+
 def get_transform(res, is_label, crop_type):
     if crop_type == "center":
         cropper = T.CenterCrop(res)
@@ -34,11 +35,14 @@ def get_transform(res, is_label, crop_type):
                           T.ToTensor(),
                           normalize])
 
+
 normalize = T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+
 
 class ToTargetTensor(object):
     def __call__(self, target):
         return torch.as_tensor(np.array(target), dtype=torch.int64).unsqueeze(0)
+
 
 def bit_get(val, idx):
     """Gets the bit value.
@@ -445,11 +449,11 @@ class MaterializedDataset(Dataset):
 
 class ContrastiveSegDataset(Dataset):
     def __init__(self,
-                 pytorch_data_dir : str,
-                 dataset_name : str,
-                 crop_type : str,
-                 model_type : str,
-                 image_set : str,
+                 pytorch_data_dir: str,
+                 dataset_name: str,
+                 crop_type: str,
+                 model_type: str,
+                 image_set: str,
                  transform,
                  target_transform,
                  cfg,
@@ -552,7 +556,7 @@ class ContrastiveSegDataset(Dataset):
 
         self._set_seed(seed)
         coord_entries = torch.meshgrid([torch.linspace(-1, 1, pack[0].shape[1]),
-                                        torch.linspace(-1, 1, pack[0].shape[2])], indexing = "ij")
+                                        torch.linspace(-1, 1, pack[0].shape[2])], indexing="ij")
         coord = torch.cat([t.unsqueeze(0) for t in coord_entries], 0)
 
         if self.extra_transform is not None:
@@ -588,6 +592,7 @@ class ContrastiveSegDataset(Dataset):
 
         return ret
 
+
 def get_class_labels(dataset_name):
     if dataset_name.startswith("cityscapes"):
         return [
@@ -619,6 +624,7 @@ def get_class_labels(dataset_name):
             'trees and vegetation']
     else:
         raise ValueError("Unknown Dataset {}".format(dataset_name))
+
 
 def create_cityscapes_colormap():
     colors = [(128, 64, 128),
