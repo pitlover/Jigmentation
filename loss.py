@@ -12,7 +12,7 @@ def norm(t):
     return F.normalize(t, dim=1, eps=1e-10)
 
 
-def sample(t: torch.Tensor, coords: torch.Tensor): # TODO grid_sample
+def sample(t: torch.Tensor, coords: torch.Tensor):  # TODO grid_sample
     return F.grid_sample(t, coords.permute(0, 2, 1, 3), padding_mode='border', align_corners=True)
 
 
@@ -26,9 +26,9 @@ def super_perm(size: int, device: torch.device):
 class StegoLoss(nn.Module):
 
     def __init__(self,
-                n_classes: int,
-                cfg: dict,
-                corr_weight: float = 1.0):
+                 n_classes: int,
+                 cfg: dict,
+                 corr_weight: float = 1.0):
         super().__init__()
 
         self.n_classes = n_classes
@@ -36,17 +36,17 @@ class StegoLoss(nn.Module):
         self.corr_loss = ContrastiveCorrelationLoss(cfg)
         self.linear_loss = LinearLoss(cfg)
 
-
     def forward(self, model_input, model_output, model_pos_output=None, linear_output: torch.Tensor() = None,
                 cluster_output: torch.Tensor() = None) \
             -> Tuple[torch.Tensor, Dict[str, float]]:
-        img, img_pos, label = model_input
+        img, label = model_input
         feats, code = model_output
 
         if self.corr_weight > 0:
             feats_pos, code_pos = model_pos_output
-            corr_loss = self.corr_loss(feats, feats_pos, code, code_pos)
+            corr_loss, corr_loss_dict = self.corr_loss(feats, feats_pos, code, code_pos)
         else:
+            corr_loss_dict = {"none": 0}
             corr_loss = torch.tensor(0, dtype=torch.float32, device=feats.device)
 
         linear_loss = self.linear_loss(linear_output, label, self.n_classes)
@@ -55,12 +55,12 @@ class StegoLoss(nn.Module):
         loss_dict = {"loss": loss.item(), "corr": corr_loss.item(), "linear": linear_loss.item(),
                      "cluster": cluster_loss.item()}
 
-        return loss, loss_dict
+        return loss, loss_dict, corr_loss_dict
 
 
 class ContrastiveCorrelationLoss(nn.Module):  # TODO need to analysis
 
-    def __init__(self, cfg : dict):
+    def __init__(self, cfg: dict):
         super().__init__()
         self.cfg = cfg
 
@@ -124,17 +124,22 @@ class ContrastiveCorrelationLoss(nn.Module):  # TODO need to analysis
                 feats, feats_neg, code, code_neg, self.cfg["corr_loss"]["neg_inter_shift"])
             neg_losses.append(neg_inter_loss)
             neg_cds.append(neg_inter_cd)
+
         neg_inter_loss = torch.cat(neg_losses, axis=0)
         neg_inter_cd = torch.cat(neg_cds, axis=0)
 
-        return (self.cfg["corr_loss"]["pos_inter_weight"] * pos_inter_loss.mean() +
-                self.cfg["corr_loss"]["pos_intra_weight"] * pos_intra_loss.mean() +
-                self.cfg["corr_loss"]["neg_inter_weight"] * neg_inter_loss.mean())
+        return (self.cfg["corr_loss"]["pos_intra_weight"] * pos_intra_loss.mean() +
+                self.cfg["corr_loss"]["pos_inter_weight"] * pos_inter_loss.mean() +
+                self.cfg["corr_loss"]["neg_inter_weight"] * neg_inter_loss.mean(),
+                {"self_loss": pos_intra_loss.mean().item(),
+                 "knn_loss":  pos_inter_loss.mean().item(),
+                 "rand_loss": neg_inter_loss.mean().item()}
+                )
 
 
 class LinearLoss(nn.Module):
 
-    def __init__(self, cfg : dict):
+    def __init__(self, cfg: dict):
         super(LinearLoss, self).__init__()
         self.cfg = cfg
         self.linear_loss = nn.CrossEntropyLoss()
@@ -142,6 +147,7 @@ class LinearLoss(nn.Module):
     def forward(self, linear_logits: torch.Tensor, label: torch.Tensor, n_classes: int):
         flat_label = label.reshape(-1)
         mask = (flat_label >= 0) & (flat_label < n_classes)
+
         linear_logits = F.interpolate(linear_logits, label.shape[-2:], mode='bilinear', align_corners=False)
         linear_logits = linear_logits.permute(0, 2, 3, 1).reshape(-1, n_classes)
         linear_loss = self.linear_loss(linear_logits[mask], flat_label[mask]).mean()

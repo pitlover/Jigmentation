@@ -1,8 +1,7 @@
-import torch
-import numpy as np
+from typing import Dict, Any
 from torchmetrics import Metric
 from scipy.optimize import linear_sum_assignment
-
+from utils.dist_utils import all_reduce_dict
 #
 # Authors: Wouter Van Gansbeke & Simon Vandenhende
 # Licensed under the CC BY-NC 4.0 license (https://creativecommons.org/licenses/by-nc/4.0/)
@@ -80,12 +79,6 @@ def batched_crf(img_tensor, prob_tensor):
     return torch.cat([torch.from_numpy(arr).unsqueeze(0) for arr in out], dim=0)
 
 
-# def batched_crf(pool, img_tensor, prob_tensor):
-#
-#     outputs = pool.map(_apply_crf, zip(img_tensor.detach().cpu(), prob_tensor.detach().cpu()))
-#     return torch.cat([torch.from_numpy(arr).unsqueeze(0) for arr in outputs], dim=0)
-
-
 class UnsupervisedMetrics(Metric):
     def __init__(self, prefix: str, n_classes: int, extra_clusters: int, compute_hungarian: bool,
                  dist_sync_on_step=True):
@@ -159,3 +152,11 @@ class UnsupervisedMetrics(Metric):
         metric_dict = {self.prefix + "mIoU": iou[~torch.isnan(iou)].mean().item(),
                        self.prefix + "Accuracy": opc.item()}
         return {k: 100 * v for k, v in metric_dict.items()}
+
+
+def get_metrics(m1: UnsupervisedMetrics, m2: UnsupervisedMetrics) -> Dict[str, Any]:
+    metrics = all_reduce_dict(m1.compute(), op="mean")
+    tmp = all_reduce_dict(m2.compute(), op="mean")
+    metrics.update(tmp)
+
+    return metrics

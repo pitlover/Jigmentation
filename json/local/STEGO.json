@@ -75,7 +75,7 @@
     },
     "train": {
         "print_freq": 25,
-        "valid_freq": 500,
+        "valid_freq": 100,
         "epoch" : 3,
         "freeze_encoder_bn" : false,
         "freeze_all_bn" : -1,

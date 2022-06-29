@@ -14,7 +14,7 @@ from utils.common_utils import (save_checkpoint, parse, dprint, time_log, comput
                                 freeze_bn, zero_grad_bn, RunningAverage, Timer)
 from utils.dist_utils import all_reduce_dict
 from utils.wandb_utils import set_wandb
-from utils.seg_utils import UnsupervisedMetrics, batched_crf
+from utils.seg_utils import UnsupervisedMetrics, batched_crf, get_metrics
 from dataset.data import (create_cityscapes_colormap, create_pascal_label_colormap)
 from build import (build_model, build_criterion, build_dataset, build_dataloader, build_optimizer)
 
@@ -221,18 +221,25 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
                 linear_probe_optimizer.zero_grad(set_to_none=True)
                 cluster_probe_optimizer.zero_grad(set_to_none=True)
 
-            model_input = (img, img_pos, label)
+            model_input = (img, label)
             model_output = net_model(img)  # feats,
             detached_code = torch.clone(model_output[1].detach())
+
             linear_output = linear_model(detached_code)
             cluster_output = cluster_model(detached_code, None)  # cluster_loss, cluster_probs
 
             if opt["loss"]["correspondence_weight"] > 0:
                 model_pos_output = net_model(img_pos)
-                loss, loss_dict = criterion(model_input, model_output, model_pos_output, linear_output, cluster_output)
+                loss, loss_dict, corr_dict = criterion(model_input=model_input,
+                                                       model_output=model_output,
+                                                       model_pos_output=model_pos_output,
+                                                       linear_output=linear_output,
+                                                       cluster_output=cluster_output)
             else:
-                loss, loss_dict = criterion(model_input, model_output, linear_output=linear_output,
-                                            cluster_output=cluster_output)
+                loss, loss_dict, corr_dict = criterion(model_input=model_input,
+                                                       model_output=model_output,
+                                                       linear_output=linear_output,
+                                                       cluster_output=cluster_output)
 
             forward_time = timer.update()
 
@@ -267,6 +274,10 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
                     for loss_k, loss_v in loss_dict.items():
                         if loss_k != "loss":
                             s += f"-- {loss_k}(now): {loss_v:.6f}\n"
+                            if loss_k == "corr":
+                                for k, v in corr_dict.items():
+                                    s += f"  -- {k}(now): {v:.6f}\n"
+
                 s += f"time(data/fwd/bwd): {data_time:.3f}/{forward_time:.3f}/{backward_time:.3f}\n"
                 s += f"LR: {lrs}\n"
                 s += f"batch_size x world_size x num_accum: " \
@@ -335,10 +346,8 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
                 linear_model.train()
                 cluster_model.train()
                 train_stats.reset()
-                break
 
             _ = timer.update()
-            break
         # --------------------------- Save --------------------------------#
         if is_master:
             save_checkpoint("latest", net_model, net_optimizer, linear_model, linear_probe_optimizer, cluster_model,
@@ -358,6 +367,7 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
 
     s = time_log()
     s += f"[BEST] ---------------------------------------------\n"
+    s += f"[BEST] ------------------- CRF ---------------------\n"
     s += f"[BEST] epoch: {best_epoch}, iters: {best_iter}\n"
     s += f"[BEST] loss: {best_loss:.6f}\n"
     for metric_k, metric_v in best_metrics.items():
@@ -371,7 +381,7 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
     cluster_model.load_state_dict(latest_checkpoint['cluster_model_state_dict'], strict=True)
     best_loss, best_metrics = evaluate(
         net_model, linear_model, cluster_model, val_loader, device=device, opt=opt["eval"],
-        n_classes=train_dataset.n_classes, is_crf=True)
+        n_classes=train_dataset.n_classes)
 
     s = time_log()
     s += f"[LATEST] ---------------------------------------------\n"
@@ -399,8 +409,6 @@ def evaluate(net_model: nn.Module,
 
     torch.cuda.empty_cache()
     net_model.eval()
-    linear_model.eval()
-    cluster_model.eval()
 
     cluster_metrics = UnsupervisedMetrics(
         "Cluster_", n_classes, opt["extra_clusters"], True)
@@ -418,8 +426,7 @@ def evaluate(net_model: nn.Module,
             code = F.interpolate(code, label.shape[-2:], mode='bilinear', align_corners=False)
 
             linear_preds = torch.log_softmax(linear_model(code), dim=1)
-            cluster_loss, cluster_preds = cluster_model(code, None)
-            # cluster_loss, cluster_preds = cluster_model(code, 2, log_probs=True)
+            cluster_loss, cluster_preds = cluster_model(code, 2, log_probs=True)
 
             if is_crf:
                 linear_preds = batched_crf(img, linear_preds).argmax(1).cuda()
@@ -430,14 +437,9 @@ def evaluate(net_model: nn.Module,
 
             linear_metrics.update(linear_preds, label)
             cluster_metrics.update(cluster_preds, label)
-
             eval_stats.append(cluster_loss)
 
-        eval_cluster = cluster_metrics.compute()
-        eval_linear = linear_metrics.compute()
-        eval_metrics = all_reduce_dict(eval_cluster, op="mean")
-        eval_linear_metrics = all_reduce_dict(eval_linear, op="mean")
-        eval_metrics.update(eval_linear_metrics)
+        eval_metrics = get_metrics(cluster_metrics, linear_metrics)
 
         return eval_stats.avg, eval_metrics
 

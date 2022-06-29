@@ -16,19 +16,19 @@ class ClusterLookup(nn.Module):
             self.clusters.copy_(torch.randn(self.n_classes, self.dim))
 
     def forward(self, x, alpha, log_probs=False): # feats, code
-        normed_clusters = F.normalize(self.clusters, dim=1)
-        normed_features = F.normalize(x, dim=1)
-        inner_products = torch.einsum("bchw,nc->bnhw", normed_features, normed_clusters)
+        normed_clusters = F.normalize(self.clusters, dim=1)     # (b, dim, h, w)
+        normed_features = F.normalize(x, dim=1) # (n_class, dim)
+
+        inner_products = torch.einsum("bchw,nc->bnhw", normed_features, normed_clusters) # (b, n_class, h, w)
 
         if alpha is None:
             cluster_probs = F.one_hot(torch.argmax(inner_products, dim=1), self.clusters.shape[0]) \
                 .permute(0, 3, 1, 2).to(torch.float32)
         else:
             cluster_probs = nn.functional.softmax(inner_products * alpha, dim=1)
-
         cluster_loss = -(cluster_probs * inner_products).sum(1).mean()
 
         if log_probs:
-            return nn.functional.log_softmax(inner_products * alpha, dim=1)
+            return cluster_loss, nn.functional.log_softmax(inner_products * alpha, dim=1)
         else:
             return cluster_loss, cluster_probs
