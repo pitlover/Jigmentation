@@ -1,11 +1,11 @@
 {
-    "gpu_ids": [0],
-    "output_dir": "./output",
+    "gpu_ids": [0, 1, 2, 3],
+    "output_dir": "./output/",
     "checkpoint": "",
     "wandb": {
         "project": "Jigmentation",
         "entity": "00310214aa-",
-        "name": "STEGO",
+        "name": "STEGO_corrX",
         "mode": "online"
     },
     "dataset": {
@@ -19,7 +19,7 @@
     },
     "dataloader": {
         "batch_size": 32,
-        "num_workers": 8
+        "num_workers": 0
     },
     "model": {
         "name": "STEGO",
@@ -41,17 +41,17 @@
     },
     "loss": {
         "name" :  "stego",
-        "correspondence_weight" : 1.0,
+        "correspondence_weight" : 0.0,
         "zero_clamp" : true,
         "pointwise" : true,
-        "stabalize" : false,
+        "stabilize" : false,
         "feature_samples" : 11,
         "neg_samples" : 5,
         "corr_loss" : {
             "neg_inter_weight": 0.63,
             "pos_inter_weight": 0.25,
             "pos_intra_weight": 0.67,
-            "neg_inter_shift": 0.16,
+            "neg_inter_shift": 0.66,
             "pos_inter_shift": 0.02,
             "pos_intra_shift": 0.08
         }
@@ -75,16 +75,17 @@
     },
     "train": {
         "print_freq": 25,
-        "valid_freq": 500,
+        "valid_freq": 100,
         "epoch" : 1,
         "freeze_encoder_bn" : false,
         "freeze_all_bn" : -1,
         "num_accum" : 1,
-        "grad_norm": 0.0
+        "grad_norm": 10.0
 
     },
     "eval": {
         "extra_clusters" : 0,
-        "n_images": 5
+        "n_images": 5,
+        "is_crf" : true
     }
 }

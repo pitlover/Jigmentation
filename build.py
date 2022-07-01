@@ -1,5 +1,5 @@
 from typing import Optional, Dict
-from torch.optim import Adam
+from torch.optim import Adam, AdamW
 import torch.distributed as dist
 from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data.dataloader import DataLoader
@@ -124,6 +124,8 @@ def build_optimizer(main_params, linear_params, cluster_params, opt: dict, model
         net_optimizer_type = opt["net"]["name"].lower()
         if net_optimizer_type == "adam":
             net_optimizer = Adam(main_params, lr=opt["net"]["lr"])
+        elif net_optimizer_type == "adamw":
+            net_optimizer = AdamW(main_params, lr=opt["net"]["lr"], weight_decay=opt["net"]["weight_decay"])
         else:
             raise ValueError(f"Unsupported optimizer type {net_optimizer_type}.")
 
