@@ -3,7 +3,7 @@ from torch.optim import Adam, AdamW
 import torch.distributed as dist
 from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data.dataloader import DataLoader
-from model.STEGO import STEGOmodel
+from model.STEGO import (STEGOmodel)
 from model.LambdaLayer import LambdaLayer
 from model.dino.DinoFeaturizer import DinoFeaturizer
 from dataset.data import ContrastiveSegDataset, get_transform
@@ -15,7 +15,7 @@ def build_model(opt: dict, n_classes: int = 27):
     # opt = opt["model"]
     model_type = opt["name"].lower()
 
-    if "stego" in model_type:
+    if "stego" in model_type or "jirano" in model_type:
         model = STEGOmodel.build(
             opt=opt,
             n_classes=n_classes
@@ -65,7 +65,7 @@ def build_model(opt: dict, n_classes: int = 27):
             if isinstance(module, (nn.BatchNorm1d, nn.BatchNorm2d, nn.SyncBatchNorm)):
                 module.eps = bn_eps
 
-    if "stego" in model_type:
+    if "stego" in model_type or "jirano" in model_type:
         return net_model, linear_model, cluster_model
     elif model_type == "dino":
         return model
@@ -76,6 +76,8 @@ def build_criterion(n_classes: int, opt: dict):
     loss_name = opt["name"].lower()
     if "stego" in loss_name:
         loss = StegoLoss(n_classes=n_classes, cfg=opt, corr_weight=opt["correspondence_weight"])
+    elif "jirano" in loss_name:
+        loss = JiranoLoss(n_classes=n_classes, cfg= opt, corr_weight=opt["correspondence_weight"], vq_weight=opt["vectorquantize_weight"])
     else:
         raise ValueError(f"Unsupported loss type {loss_name}")
 
@@ -120,7 +122,7 @@ def build_optimizer(main_params, linear_params, cluster_params, opt: dict, model
     # opt = opt["optimizer"]
     model_type = model_type.lower()
 
-    if "stego" in model_type:
+    if "stego" in model_type or "jirano" in model_type:
         net_optimizer_type = opt["net"]["name"].lower()
         if net_optimizer_type == "adam":
             net_optimizer = Adam(main_params, lr=opt["net"]["lr"])

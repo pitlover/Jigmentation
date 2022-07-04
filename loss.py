@@ -23,6 +23,49 @@ def super_perm(size: int, device: torch.device):
     return perm % size
 
 
+class JiranoLoss(nn.Module):
+
+    def __init__(self,
+                 n_classes: int,
+                 cfg: dict,
+                 corr_weight: float = 0.0,
+                 vq_weight : float = 0.0):
+        super().__init__()
+
+        self.n_classes = n_classes
+        self.corr_weight = corr_weight
+        self.corr_loss = ContrastiveCorrelationLoss(cfg)
+        self.linear_loss = LinearLoss(cfg)
+        self.vq_weight = vq_weight
+
+    def forward(self, model_input, model_output, model_pos_output=None,
+                vq_output : torch.Tensor() = None,
+                linear_output: torch.Tensor() = None,
+                cluster_output: torch.Tensor() = None) \
+            -> Tuple[torch.Tensor, Dict[str, float]]:
+        img, label = model_input
+        feats, code = model_output
+
+        if self.corr_weight > 0:
+            feats_pos, code_pos = model_pos_output
+            corr_loss, corr_loss_dict = self.corr_loss(feats, feats_pos, code, code_pos)
+        else:
+            corr_loss_dict = {"none": 0}
+            corr_loss = torch.tensor(0, dtype=torch.float32, device=feats.device)
+
+        linear_loss = self.linear_loss(linear_output, label, self.n_classes)
+        cluster_loss = cluster_output[0]
+        vq_loss = vq_output[0]
+        loss = (corr_loss * self.corr_weight) + (vq_loss * self.vq_weight) + linear_loss + cluster_loss
+        loss_dict = {"loss": loss.item(),
+                     "corr": corr_loss.item(),
+                     "vq" : vq_loss.item(),
+                     "linear": linear_loss.item(),
+                     "cluster": cluster_loss.item()}
+
+        return loss, loss_dict, corr_loss_dict, vq_output[2]
+
+
 class StegoLoss(nn.Module):
 
     def __init__(self,
@@ -58,7 +101,7 @@ class StegoLoss(nn.Module):
         return loss, loss_dict, corr_loss_dict
 
 
-class ContrastiveCorrelationLoss(nn.Module):  # TODO need to analysis
+class ContrastiveCorrelationLoss(nn.Module):
 
     def __init__(self, cfg: dict):
         super().__init__()
@@ -134,7 +177,7 @@ class ContrastiveCorrelationLoss(nn.Module):  # TODO need to analysis
                 self.cfg["corr_loss"]["pos_inter_weight"] * pos_inter_loss.mean() +
                 self.cfg["corr_loss"]["neg_inter_weight"] * neg_inter_loss.mean(),
                 {"self_loss": pos_intra_loss.mean().item(),
-                 "knn_loss":  pos_inter_loss.mean().item(),
+                 "knn_loss": pos_inter_loss.mean().item(),
                  "rand_loss": neg_inter_loss.mean().item()}
                 )
 

@@ -10,6 +10,7 @@ from torch.nn.parallel.distributed import DistributedDataParallel
 from torch.utils.data.dataloader import DataLoader
 import wandb
 import os
+from VectorQuantizer import VectorQuantizer
 from utils.common_utils import (save_checkpoint, parse, dprint, time_log, compute_param_norm,
                                 freeze_bn, zero_grad_bn, RunningAverage, Timer)
 from utils.dist_utils import all_reduce_dict
@@ -225,24 +226,39 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
                 cluster_probe_optimizer.zero_grad(set_to_none=True)
 
             model_input = (img, label)
-            model_output = net_model(img)  # feats,
-            detached_code = torch.clone(model_output[1].detach())
+            model_output = net_model(img)  # feats : (b, 384, 28, 28) codes : (b, 70, 28, 28)
 
-            linear_output = linear_model(detached_code)
-            cluster_output = cluster_model(detached_code, None)  # cluster_loss, cluster_probs
+            if opt["loss"]["vectorquantize_weight"] > 0:
+                vq_model = VectorQuantizer(opt=opt["loss"]["vq_loss"])
+                vq_output = vq_model(model_output[1]) # loss, codes, vq_dict
+                print(model_output.shape)
 
-            if opt["loss"]["correspondence_weight"] > 0:
-                model_pos_output = net_model(img_pos)
-                loss, loss_dict, corr_dict = criterion(model_input=model_input,
+                loss, loss_dict, corr_dict, vq_dict = criterion(model_input=model_input,
                                                        model_output=model_output,
-                                                       model_pos_output=model_pos_output,
+                                                       vq_output = vq_output,
                                                        linear_output=linear_output,
                                                        cluster_output=cluster_output)
+                print(loss, loss_dict)
+                exit()
             else:
-                loss, loss_dict, corr_dict = criterion(model_input=model_input,
-                                                       model_output=model_output,
-                                                       linear_output=linear_output,
-                                                       cluster_output=cluster_output)
+
+                detached_code = torch.clone(model_output[1].detach())
+
+                linear_output = linear_model(detached_code)
+                cluster_output = cluster_model(detached_code, None)  # cluster_loss, cluster_probs
+
+                if opt["loss"]["correspondence_weight"] > 0:
+                    model_pos_output = net_model(img_pos)
+                    loss, loss_dict, corr_dict = criterion(model_input=model_input,
+                                                           model_output=model_output,
+                                                           model_pos_output=model_pos_output,
+                                                           linear_output=linear_output,
+                                                           cluster_output=cluster_output)
+                else:
+                    loss, loss_dict, corr_dict = criterion(model_input=model_input,
+                                                           model_output=model_output,
+                                                           linear_output=linear_output,
+                                                           cluster_output=cluster_output)
 
             forward_time = timer.update()
 
