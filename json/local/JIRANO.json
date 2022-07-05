@@ -40,8 +40,8 @@
         }
     },
     "loss": {
-        "name" :  "stego",
-        "correspondence_weight" : 1.0,
+        "name" :  "jirano",
+        "correspondence_weight" : 0.0,
         "zero_clamp" : true,
         "pointwise" : true,
         "stabilize" : false,
@@ -54,6 +54,12 @@
             "neg_inter_shift": 0.66,
             "pos_inter_shift": 0.02,
             "pos_intra_shift": 0.08
+        },
+        "vectorquantize_weight" : 1.0,
+        "vq_loss" : {
+            "e_weight" : 0.25,
+            "embedding_dim" : 70,
+            "K" : 27
         }
     },
 

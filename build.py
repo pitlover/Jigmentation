@@ -42,7 +42,14 @@ def build_model(opt: dict, n_classes: int = 27):
             cluster_params += p.numel()
         
         '''
-
+    elif "jirano" in model_type:
+        model = STEGOmodel.build(
+            opt=opt,
+            n_classes=n_classes
+        )
+        net_model = model.net
+        linear_model = nn.Identity
+        cluster_model = model.cluster_probe
 
     elif model_type == "dino":
         model = nn.Sequential(
@@ -207,11 +214,13 @@ def build_dataset(opt: dict, mode: str = "train", model_type: str = "dino") -> C
             pos_images=True,
             pos_labels=True
         )
-    elif mode == "val":
-        if data_type == "voc":
-            val_loader_crop = None
+    elif mode == "val" or mode == "test":
+        if mode == "test":
+            loader_crop = "center"
+        elif data_type == "voc":
+            loader_crop = None
         else:
-            val_loader_crop = "center"
+            loader_crop = "center"
 
         return ContrastiveSegDataset(
             pytorch_data_dir=opt["data_path"],
@@ -219,8 +228,8 @@ def build_dataset(opt: dict, mode: str = "train", model_type: str = "dino") -> C
             crop_type=None,
             model_type=model_type,
             image_set="val",
-            transform=get_transform(320, False, val_loader_crop),
-            target_transform=get_transform(320, True, val_loader_crop),
+            transform=get_transform(320, False, loader_crop),
+            target_transform=get_transform(320, True, loader_crop),
             mask=True,
             cfg=opt,
         )

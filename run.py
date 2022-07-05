@@ -10,13 +10,13 @@ from torch.nn.parallel.distributed import DistributedDataParallel
 from torch.utils.data.dataloader import DataLoader
 import wandb
 import os
+from tqdm import tqdm
 from VectorQuantizer import VectorQuantizer
 from utils.common_utils import (save_checkpoint, parse, dprint, time_log, compute_param_norm,
                                 freeze_bn, zero_grad_bn, RunningAverage, Timer)
 from utils.dist_utils import all_reduce_dict
 from utils.wandb_utils import set_wandb
 from utils.seg_utils import UnsupervisedMetrics, batched_crf, get_metrics
-from dataset.data import (create_cityscapes_colormap, create_pascal_label_colormap)
 from build import (build_model, build_criterion, build_dataset, build_dataloader, build_optimizer)
 from pytorch_lightning.utilities.seed import seed_everything
 
@@ -26,21 +26,8 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
     seed_everything(seed=10)
 
     # -------------------- Folder Setup (Task-Specific) --------------------------#
-    data_dir = os.path.join(opt["output_dir"], "data")
-    log_dir = os.path.join(opt["output_dir"], "logs")
-    checkpoint_dir = os.path.join("./", "checkpoints")
-
     prefix = "{}/{}_{}".format(opt["output_dir"], opt["dataset"]["data_type"], opt["wandb"]["name"])
     opt["full_name"] = prefix
-
-    os.makedirs(data_dir, exist_ok=True)
-    os.makedirs(log_dir, exist_ok=True)
-    os.makedirs(checkpoint_dir, exist_ok=True)
-
-    if opt["dataset"]["data_type"].startswith("cityscapes"):  # TODO validation_epoch_and
-        label_cmap = create_cityscapes_colormap()
-    else:
-        label_cmap = create_pascal_label_colormap()
 
     # -------------------- Distributed Setup --------------------------#
     if (opt["num_gpus"] == 0) or (not torch.cuda.is_available()):
@@ -67,6 +54,8 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
 
     if not wandb_save_dir:
         wandb_save_dir = os.path.join(opt["output_dir"], opt["wandb"]["name"])
+    if is_test:
+        wandb_save_dir = "/".join(opt["checkpoint"].split("/")[:-1])
 
     # ------------------------ DataLoader ------------------------------#
     if is_train:
@@ -78,17 +67,20 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
     val_dataset = build_dataset(opt["dataset"], mode="val", model_type=opt["model"]["pretrained"]["model_type"])
     val_loader = build_dataloader(val_dataset, opt["dataloader"], shuffle=False,
                                   batch_size=world_size)
-                                  # batch_size=opt["dataloader"]["batch_size"])
 
-    # test_dataset = build_dataset(opt["dataset"], mode="test")
-    # test_loader = build_dataloader(test_dataset, opt["dataloader"], shuffle=False,
-    #                                batch_size=dist.get_world_size())
+    test_dataset = build_dataset(opt["dataset"], mode="test")
+    test_loader = build_dataloader(test_dataset, opt["dataloader"], shuffle=False,
+                                   batch_size=1)
 
     # -------------------------- Define -------------------------------#
     net_model, linear_model, cluster_model = build_model(opt=opt["model"],
-                                                         n_classes=train_dataset.n_classes)  # CPU model
+                                                         n_classes=val_dataset.n_classes)  # CPU model
 
-    criterion = build_criterion(n_classes=train_dataset.n_classes,
+    if opt["loss"].get("vectorquantize_weight", 0) != 0:
+        vq_model = VectorQuantizer(opt=opt["loss"]["vq_loss"])
+    else:
+        vq_model = nn.Identity
+    criterion = build_criterion(n_classes=val_dataset.n_classes,
                                 opt=opt["loss"])  # CPU criterion
 
     device = torch.device("cuda", local_rank)  # "cuda:0" for single GPU
@@ -135,14 +127,16 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
         net_model.load_state_dict(checkpoint['net_model_state_dict'], strict=True)
         linear_model.load_state_dict(checkpoint['linear_model_state_dict'], strict=True)
         cluster_model.load_state_dict(checkpoint['cluster_model_state_dict'], strict=True)
-
-        net_optimizer.load_state_dict(checkpoint['net_optimizer_state_dict'])
-        linear_probe_optimizer.load_state_dict(checkpoint['linear_optimizer_state_dict'])
-        cluster_probe_optimizer.load_state_dict(checkpoint['cluster_optimizer_state_dict'])
+        if opt["loss"].get("vectorquantize_weight", 0) != 0:
+            vq_model.load_state_dict(checkpoint['vq_model_state_dict'], strict=True)
+        if is_train:
+            net_optimizer.load_state_dict(checkpoint['net_optimizer_state_dict'])
+            linear_probe_optimizer.load_state_dict(checkpoint['linear_optimizer_state_dict'])
+            cluster_probe_optimizer.load_state_dict(checkpoint['cluster_optimizer_state_dict'])
 
         start_epoch = max(checkpoint.get('epoch', 0), 0)
         current_iter = max(checkpoint.get('iter', 0), 0)
-        best_metric = min(checkpoint.get("best", 0), 0)  # abs rel, lower better
+        best_metric = max(checkpoint.get("best", 0), 0)  # abs rel, lower better
         best_epoch = max(checkpoint.get('best_epoch', 0), 0)
         best_iter = max(checkpoint.get('best_iter', 0), 0)
         print_fn(f"Checkpoint loaded: epoch {start_epoch}, iters {current_iter}, best metric: {best_metric:.6f}")
@@ -159,12 +153,14 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
         num_accum = 1
 
     timer = Timer()
-    # --------------------------- Test --------------------------------#  # TODO CRF, K-means
+    # --------------------------- Test --------------------------------#
     if is_test:
         _ = timer.update()
-        test_loss, test_metrics = evaluate(
-            net_model, linear_model, cluster_model,
-            val_loader, device=device, opt=opt["eval"], n_classes=train_dataset.n_classes)
+        test_loss, test_metrics = evaluate(  # TODO check flip version
+            net_model, vq_model, linear_model, cluster_model,
+            test_loader, device=device, opt=opt["eval"],
+            n_classes=val_dataset.n_classes, data_type=opt["dataset"]["data_type"],
+            saved_dir=wandb_save_dir, is_crf=opt["eval"]["is_crf"])
         test_time = timer.update()
 
         s = time_log()
@@ -229,21 +225,27 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
             model_output = net_model(img)  # feats : (b, 384, 28, 28) codes : (b, 70, 28, 28)
 
             if opt["loss"]["vectorquantize_weight"] > 0:
-                vq_model = VectorQuantizer(opt=opt["loss"]["vq_loss"])
-                vq_output = vq_model(model_output[1]) # loss, codes, vq_dict
-                print(model_output.shape)
+                vq_output = vq_model(model_output[1])  # loss, codes, vq_dict
+                detached_code = torch.clone(vq_output[1].detach())
+
+                # TOPO is_direct_metric ?
+                print(detached_code.shape)
+                print(vq_output[1].shape)
+                linear_output = linear_model(detached_code)
+                print(linear_output.shape)
+                exit()
+                cluster_output = cluster_model(detached_code, None, is_direct=True)  # cluster_loss, cluster_probs
 
                 loss, loss_dict, corr_dict, vq_dict = criterion(model_input=model_input,
-                                                       model_output=model_output,
-                                                       vq_output = vq_output,
-                                                       linear_output=linear_output,
-                                                       cluster_output=cluster_output)
-                print(loss, loss_dict)
-                exit()
+                                                                model_output=model_output,
+                                                                vq_output=vq_output,
+                                                                linear_output=linear_output,
+                                                                cluster_output=cluster_output)
+
             else:
 
                 detached_code = torch.clone(model_output[1].detach())
-
+                vq_model = None
                 linear_output = linear_model(detached_code)
                 cluster_output = cluster_model(detached_code, None)  # cluster_loss, cluster_probs
 
@@ -296,7 +298,9 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
                             if loss_k == "corr":
                                 for k, v in corr_dict.items():
                                     s += f"  -- {k}(now): {v:.6f}\n"
-
+                            elif loss_k == "vq":
+                                for k, v in vq_dict.items():
+                                    s += f"  -- {k}(now): {v:.6f}\n"
                 s += f"time(data/fwd/bwd): {data_time:.3f}/{forward_time:.3f}/{backward_time:.3f}\n"
                 s += f"LR: {lrs}\n"
                 s += f"batch_size x world_size x num_accum: " \
@@ -319,8 +323,8 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
             if ((i + 1) % valid_freq == 0) or ((i + 1) == len(train_loader)):
                 _ = timer.update()
                 valid_loss, valid_metrics = evaluate(
-                    net_model, linear_model, cluster_model, val_loader, device=device, opt=opt["eval"],
-                    n_classes=train_dataset.n_classes)
+                    net_model, vq_model, linear_model, cluster_model, val_loader, device=device, opt=opt["eval"],
+                    n_classes=val_dataset.n_classes)
                 valid_time = timer.update()
 
                 s = time_log()
@@ -340,7 +344,8 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
                     s += f"[VAL] -------- updated ({metric})! {prev_best_metric:.6f} -> {best_metric:.6f}\n"
                     if is_master:
                         save_checkpoint(
-                            "best", net_model, net_optimizer, linear_model, linear_probe_optimizer, cluster_model,
+                            "best", net_model, net_optimizer, vq_model, linear_model, linear_probe_optimizer,
+                            cluster_model,
                             cluster_probe_optimizer,
                             current_epoch, current_iter, best_metric, wandb_save_dir, model_only=True)
                     for metric_k, metric_v in valid_metrics.items():
@@ -366,9 +371,11 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
                 train_stats.reset()
 
             _ = timer.update()
+
         # --------------------------- Save --------------------------------#
         if is_master:
-            save_checkpoint("latest", net_model, net_optimizer, linear_model, linear_probe_optimizer, cluster_model,
+            save_checkpoint("latest", net_model, net_optimizer, vq_model, linear_model, linear_probe_optimizer,
+                            cluster_model,
                             cluster_probe_optimizer,
                             current_epoch, current_iter, best_metric, wandb_save_dir,
                             best_epoch=best_epoch, best_iter=best_iter, model_only=False)
@@ -380,8 +387,8 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
     linear_model.load_state_dict(best_checkpoint['linear_model_state_dict'], strict=True)
     cluster_model.load_state_dict(best_checkpoint['cluster_model_state_dict'], strict=True)
     best_loss, best_metrics = evaluate(
-        net_model, linear_model, cluster_model, val_loader, device=device, opt=opt["eval"],
-        n_classes=train_dataset.n_classes, is_crf=True)
+        net_model, vq_model, linear_model, cluster_model, val_loader, device=device, opt=opt["eval"],
+        n_classes=train_dataset.n_classes, is_crf=opt["eval"]["is_crf"])
 
     s = time_log()
     s += f"[BEST] ---------------------------------------------\n"
@@ -398,7 +405,7 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
     linear_model.load_state_dict(latest_checkpoint['linear_model_state_dict'], strict=True)
     cluster_model.load_state_dict(latest_checkpoint['cluster_model_state_dict'], strict=True)
     best_loss, best_metrics = evaluate(
-        net_model, linear_model, cluster_model, val_loader, device=device, opt=opt["eval"],
+        net_model, vq_model, linear_model, cluster_model, val_loader, device=device, opt=opt["eval"],
         n_classes=train_dataset.n_classes)
 
     s = time_log()
@@ -415,13 +422,16 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
 
 
 def evaluate(net_model: nn.Module,
+             vq_model: nn.Module,
              linear_model: nn.Module,
              cluster_model: nn.Module,
              eval_loader: DataLoader,
              device: torch.device,
              opt: Dict,
              n_classes: int,
-             is_crf: bool = False
+             is_crf: bool = False,
+             data_type: str = "",
+             saved_dir: str = ""
              ) -> Tuple[float, Dict[str, float]]:  # noqa
     # opt = opt["eval"]
 
@@ -434,12 +444,21 @@ def evaluate(net_model: nn.Module,
 
     with torch.no_grad():
         eval_stats = RunningAverage()  # loss
+        from collections import defaultdict
+        saved_data = defaultdict(list)  # for visualization
 
-        for i, data in enumerate(eval_loader):
+        for i, data in enumerate(tqdm(eval_loader)):
             img: torch.Tensor = data['img'].to(device, non_blocking=True)
             label: torch.Tensor = data['label'].to(device, non_blocking=True)
+            img_path : str = data['img_path']
 
             feats, code = net_model(img)
+
+            if vq_model != nn.Identity:
+                vq_model.eval()
+                vq_output = vq_model(code)
+                code = vq_output[1]
+
             code = F.interpolate(code, label.shape[-2:], mode='bilinear', align_corners=False)
 
             if is_crf:
@@ -449,14 +468,25 @@ def evaluate(net_model: nn.Module,
                 cluster_preds = batched_crf(img, cluster_preds).argmax(1).cuda()
             else:
                 linear_preds = linear_model(code).argmax(1)
-                cluster_loss, cluster_preds = cluster_model(code, None)
+                cluster_loss, cluster_preds = cluster_model(code, log_probs=None)
                 cluster_preds = cluster_preds.argmax(1)
 
             linear_metrics.update(linear_preds, label)
             cluster_metrics.update(cluster_preds, label)
             eval_stats.append(cluster_loss)
 
+            if opt["is_visualize"]:
+                from visualize import visualization
+                saved_data["img_path"].append("".join(img_path))
+                saved_data["cluster_preds"].append(cluster_preds.cpu().squeeze(0))
+                saved_data["label"].append(label.cpu().squeeze(0))
+
         eval_metrics = get_metrics(cluster_metrics, linear_metrics)
+
+        if opt["is_visualize"]:
+            visualization(saved_dir, data_type, saved_data, cluster_metrics)
+
+
 
         return eval_stats.avg, eval_metrics
 

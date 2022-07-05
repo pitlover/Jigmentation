@@ -324,6 +324,7 @@ class Coco(Dataset):
     def __getitem__(self, index):
         image_path = self.image_files[index]
         label_path = self.label_files[index]
+
         seed = np.random.randint(2147483647)
         random.seed(seed)
         torch.manual_seed(seed)
@@ -345,9 +346,9 @@ class Coco(Dataset):
             return img, coarser_labels, coarser_labels >= 0
         else:
             if self.exclude_things:
-                return img, coarse_label - self.first_stuff_index, (coarse_label >= self.first_stuff_index)
+                return img, coarse_label - self.first_stuff_index, (coarse_label >= self.first_stuff_index), image_path
             else:
-                return img, coarse_label, coarse_label >= 0
+                return img, coarse_label, coarse_label >= 0, image_path
 
     def __len__(self):
         return len(self.image_files)
@@ -568,6 +569,7 @@ class ContrastiveSegDataset(Dataset):
             "ind": ind,
             "img": extra_trans(ind, pack[0]),
             "label": extra_trans(ind, pack[1]),
+            "img_path": extra_trans(ind, pack[3])
         }
 
         if self.pos_images:
