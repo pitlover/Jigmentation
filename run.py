@@ -218,7 +218,8 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
             batch_size = img.shape[0]
             if i % num_accum == 0:
                 net_optimizer.zero_grad(set_to_none=True)
-                linear_probe_optimizer.zero_grad(set_to_none=True)
+                if opt["loss"]["vectorquantize_weight"] == 0:
+                    linear_probe_optimizer.zero_grad(set_to_none=True)
                 cluster_probe_optimizer.zero_grad(set_to_none=True)
 
             model_input = (img, label)
@@ -228,12 +229,8 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
                 vq_output = vq_model(model_output[1])  # loss, codes, vq_dict
                 detached_code = torch.clone(vq_output[1].detach())
 
-                # TOPO is_direct_metric ?
-                print(detached_code.shape)
-                print(vq_output[1].shape)
+                # TODO is_direct_metric ? should be (27, 28, 28)
                 linear_output = linear_model(detached_code)
-                print(linear_output.shape)
-                exit()
                 cluster_output = cluster_model(detached_code, None, is_direct=True)  # cluster_loss, cluster_probs
 
                 loss, loss_dict, corr_dict, vq_dict = criterion(model_input=model_input,
@@ -243,11 +240,10 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
                                                                 cluster_output=cluster_output)
 
             else:
-
                 detached_code = torch.clone(model_output[1].detach())
                 vq_model = None
                 linear_output = linear_model(detached_code)
-                cluster_output = cluster_model(detached_code, None)  # cluster_loss, cluster_probs
+                cluster_output = cluster_model(detached_code, None, is_direct=False)  # cluster_loss, cluster_probs
 
                 if opt["loss"]["correspondence_weight"] > 0:
                     model_pos_output = net_model(img_pos)
@@ -275,7 +271,9 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
 
                 g_norm = nn.utils.clip_grad_norm_(net_model.parameters(), grad_norm)
                 net_optimizer.step()
-                linear_probe_optimizer.step()
+                if opt["loss"]["vectorquantize_weight"] == 0:
+                    linear_probe_optimizer.step()
+
                 cluster_probe_optimizer.step()
                 current_iter += 1
 
@@ -450,25 +448,26 @@ def evaluate(net_model: nn.Module,
         for i, data in enumerate(tqdm(eval_loader)):
             img: torch.Tensor = data['img'].to(device, non_blocking=True)
             label: torch.Tensor = data['label'].to(device, non_blocking=True)
-            img_path : str = data['img_path']
+            img_path: str = data['img_path']
 
             feats, code = net_model(img)
-
+            opt["is_direct"] = False
             if vq_model != nn.Identity:
                 vq_model.eval()
                 vq_output = vq_model(code)
                 code = vq_output[1]
+                opt["is_direct"] = True
 
             code = F.interpolate(code, label.shape[-2:], mode='bilinear', align_corners=False)
 
             if is_crf:
                 linear_preds = torch.log_softmax(linear_model(code), dim=1)
-                cluster_loss, cluster_preds = cluster_model(code, 2, log_probs=True)
+                cluster_loss, cluster_preds = cluster_model(code, 2, log_probs=True, is_direct=opt["is_direct"])
                 linear_preds = batched_crf(img, linear_preds).argmax(1).cuda()
                 cluster_preds = batched_crf(img, cluster_preds).argmax(1).cuda()
             else:
                 linear_preds = linear_model(code).argmax(1)
-                cluster_loss, cluster_preds = cluster_model(code, log_probs=None)
+                cluster_loss, cluster_preds = cluster_model(code, None, is_direct=opt["is_direct"])
                 cluster_preds = cluster_preds.argmax(1)
 
             linear_metrics.update(linear_preds, label)
@@ -485,8 +484,6 @@ def evaluate(net_model: nn.Module,
 
         if opt["is_visualize"]:
             visualization(saved_dir, data_type, saved_data, cluster_metrics)
-
-
 
         return eval_stats.avg, eval_metrics
 

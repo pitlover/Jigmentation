@@ -5,7 +5,7 @@
     "wandb": {
         "project": "Jigmentation",
         "entity": "00310214aa-",
-        "name": "JIRANO_vq",
+        "name": "JIRANO_vq2d",
         "mode": "online"
     },
     "dataset": {
@@ -22,7 +22,7 @@
         "num_workers": 8
     },
     "model": {
-        "name": "STEGO",
+        "name": "JIRANO",
         "arch" : "dino",
         "continuous" : true,
         "dim" : 70,
@@ -94,6 +94,6 @@
         "extra_clusters" : 0,
         "n_images": 5,
         "is_crf" : true,
-        "is_visualize" : true
+        "is_visualize" : false
     }
 }

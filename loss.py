@@ -198,3 +198,4 @@ class LinearLoss(nn.Module):
         linear_loss = self.linear_loss(linear_logits[mask], flat_label[mask]).mean()
 
         return linear_loss
+

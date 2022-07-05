@@ -21,7 +21,7 @@ def prep_for_plot(img, rescale=True, resize=None):
     return plot_img
 
 
-def visualization(save_dir: str, dataset_type: str, saved_data: defaultdict, cluster_metrics: UnsupervisedMetrics):
+def visualization(save_dir: str, dataset_type: str, saved_data: defaultdict, cluster_metrics: UnsupervisedMetrics, is_label : bool = False):
     os.makedirs(join(save_dir, "label"), exist_ok=True)
     os.makedirs(join(save_dir, "cluster"), exist_ok=True)
 
@@ -32,9 +32,9 @@ def visualization(save_dir: str, dataset_type: str, saved_data: defaultdict, clu
 
     for index in range(len(saved_data["img_path"])):
         file_name = str(saved_data["img_path"][index]).split("/")[-1].split(".")[0]
-        plot_label = (label_cmap[saved_data["label"][index]]).astype(np.uint8)
-
-        Image.fromarray(plot_label).save(join(join(save_dir, "label", file_name + ".png")))
+        if is_label:
+            plot_label = (label_cmap[saved_data["label"][index]]).astype(np.uint8)
+            Image.fromarray(plot_label).save(join(join(save_dir, "label", file_name + ".png")))
 
         plot_cluster = (label_cmap[cluster_metrics.map_clusters(saved_data["cluster_preds"][index])]).astype(np.uint8)
         Image.fromarray(plot_cluster).save(join(join(save_dir, "cluster", file_name + ".png")))

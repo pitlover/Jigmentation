@@ -15,7 +15,7 @@ def build_model(opt: dict, n_classes: int = 27):
     # opt = opt["model"]
     model_type = opt["name"].lower()
 
-    if "stego" in model_type or "jirano" in model_type:
+    if "stego" in model_type:
         model = STEGOmodel.build(
             opt=opt,
             n_classes=n_classes
@@ -48,7 +48,7 @@ def build_model(opt: dict, n_classes: int = 27):
             n_classes=n_classes
         )
         net_model = model.net
-        linear_model = nn.Identity
+        linear_model = nn.Identity()
         cluster_model = model.cluster_probe
 
     elif model_type == "dino":
@@ -138,11 +138,14 @@ def build_optimizer(main_params, linear_params, cluster_params, opt: dict, model
         else:
             raise ValueError(f"Unsupported optimizer type {net_optimizer_type}.")
 
-        linear_probe_optimizer_type = opt["linear"]["name"].lower()
-        if linear_probe_optimizer_type == "adam":
-            linear_probe_optimizer = Adam(linear_params, lr=opt["linear"]["lr"])
+        if "stego" in model_type:
+            linear_probe_optimizer_type = opt["linear"]["name"].lower()
+            if linear_probe_optimizer_type == "adam":
+                linear_probe_optimizer = Adam(linear_params, lr=opt["linear"]["lr"])
+            else:
+                raise ValueError(f"Unsupported optimizer type {linear_probe_optimizer_type}.")
         else:
-            raise ValueError(f"Unsupported optimizer type {linear_probe_optimizer_type}.")
+            linear_probe_optimizer = None
 
         cluster_probe_optimizer_type = opt["cluster"]["name"].lower()
         if cluster_probe_optimizer_type == "adam":

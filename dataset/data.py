@@ -426,7 +426,7 @@ class CroppedDataset(Dataset):
 
         target = target - 1
         mask = target == -1
-        return image, target.squeeze(0), mask
+        return image, target.squeeze(0), mask, index
 
     def __len__(self):
         return self.num_images
@@ -591,6 +591,7 @@ class ContrastiveSegDataset(Dataset):
 
             ret["img_aug"] = img_aug
             ret["coord_aug"] = coord_aug.permute(1, 2, 0)
+
 
         return ret
 
