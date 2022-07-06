@@ -1,11 +1,11 @@
 {
-    "gpu_ids": [0],
+    "gpu_ids": [3],
     "output_dir": "./output/",
     "checkpoint": "",
     "wandb": {
         "project": "Jigmentation",
         "entity": "00310214aa-",
-        "name": "JIRANO_vq2d_70_3",
+        "name": "JIRANO_vq2d_128_70",
         "mode": "online"
     },
     "dataset": {
@@ -25,7 +25,7 @@
         "name": "JIRANO",
         "arch": "dino",
         "continuous": true,
-        "dim": 70,
+        "dim": 128,
         "extra_clusters": 0,
         "bn_momentum": null,
         "bn_eps": null,
@@ -58,8 +58,8 @@
         "vectorquantize_weight": 1.0,
         "vq_loss": {
             "e_weight": 0.25,
-            "embedding_dim": 70,
-            "K": 54
+            "embedding_dim": 128,
+            "K": 70
         }
     },
     "optimizer": {

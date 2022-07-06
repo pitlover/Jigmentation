@@ -5,11 +5,12 @@ import torch.nn.functional as F
 
 class VectorQuantizer(nn.Module):
     def __init__(self,
-                 opt: dict
+                 opt: dict,
+                 embedding_dim : int
                  ):
         super().__init__()
 
-        self.embedding_dim = opt["embedding_dim"]
+        self.embedding_dim = embedding_dim
         self.K = opt["K"]  # TODO maybe auxiliary extra-cluster?
         self.e_weight = opt["e_weight"]
 
@@ -30,6 +31,7 @@ class VectorQuantizer(nn.Module):
         encoding_indices = torch.argmin(distances, dim=1).unsqueeze(1)  # (b * 28 * 28, 1)
         encodings = torch.zeros(encoding_indices.shape[0], self.K, device=inputs.device)  # (b * 28 * 28, K)
         encodings.scatter_(1, encoding_indices, 1)  # label one-hot vector
+
         # quantize and unflatten
         quantized = torch.matmul(encodings, self.embedding.weight)
         quantized = quantized.view(input_shape)  # (b, 28, 28, dim)

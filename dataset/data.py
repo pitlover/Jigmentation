@@ -130,7 +130,7 @@ class DirectoryDataset(Dataset):
             label_fn = self.label_files[index]
             label = Image.open(join(self.label_dir, label_fn))
 
-        seed = np.random.randint(2147483647)
+        seed = random.randint(0, 2147483647)
         random.seed(seed)
         torch.manual_seed(seed)
         img = self.transform(img)
@@ -188,7 +188,7 @@ class Potsdam(Dataset):
         except FileNotFoundError:
             label = to_pil_image(torch.ones(1, img.height, img.width))
 
-        seed = np.random.randint(2147483647)
+        seed = random.randint(0, 2147483647)
         random.seed(seed)
         torch.manual_seed(seed)
         img = self.transform(img)
@@ -239,7 +239,7 @@ class PotsdamRaw(Dataset):
         except FileNotFoundError:
             label = to_pil_image(torch.ones(1, img.height, img.width))
 
-        seed = np.random.randint(2147483647)
+        seed = random.randint(0, 2147483647)
         random.seed(seed)
         torch.manual_seed(seed)
         img = self.transform(img)
@@ -325,7 +325,7 @@ class Coco(Dataset):
         image_path = self.image_files[index]
         label_path = self.label_files[index]
 
-        seed = np.random.randint(2147483647)
+        seed = random.randint(0, 2147483647)
         random.seed(seed)
         torch.manual_seed(seed)
         img = self.transform(Image.open(image_path).convert("RGB"))
@@ -380,7 +380,7 @@ class CityscapesSeg(Dataset):
         if self.transform is not None:
             image, target = self.inner_loader[index]
 
-            seed = np.random.randint(2147483647)
+            seed = random.randint(0, 2147483647)
             random.seed(seed)
             torch.manual_seed(seed)
             image = self.transform(image)
@@ -416,7 +416,7 @@ class CroppedDataset(Dataset):
         image = Image.open(join(self.img_dir, "{}.jpg".format(index))).convert('RGB')
         target = Image.open(join(self.label_dir, "{}.png".format(index)))
 
-        seed = np.random.randint(2147483647)
+        seed = random.randint(0, 2147483647)
         random.seed(seed)
         torch.manual_seed(seed)
         image = self.transform(image)
@@ -553,7 +553,7 @@ class ContrastiveSegDataset(Dataset):
             ind_pos = self.nns[ind][torch.randint(low=1, high=self.num_neighbors + 1, size=[]).item()]
             pack_pos = self.dataset[ind_pos]
 
-        seed = np.random.randint(2147483647)  # make a seed with numpy generator
+        seed = random.randint(0, 2147483647)  # make a seed with numpy generator
 
         self._set_seed(seed)
         coord_entries = torch.meshgrid([torch.linspace(-1, 1, pack[0].shape[1]),

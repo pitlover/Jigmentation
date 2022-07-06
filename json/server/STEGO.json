@@ -1,11 +1,11 @@
 {
-    "gpu_ids": [1, 2, 3],
+    "gpu_ids": [1],
     "output_dir": "./output/",
     "checkpoint": "",
     "wandb": {
         "project": "Jigmentation",
         "entity": "00310214aa-",
-        "name": "STEGO_direct",
+        "name": "STEGO_vq_27_direct",
         "mode": "online"
     },
     "dataset": {
@@ -19,7 +19,7 @@
     },
     "dataloader": {
         "batch_size": 32,
-        "num_workers": 30
+        "num_workers": 4
     },
     "model": {
         "name": "STEGO",
@@ -91,7 +91,8 @@
         "extra_clusters" : 0,
         "n_images": 5,
         "is_crf" : true,
-        "is_direct" :  false,
-        "is_visualize" : false
+        "is_visualize" : false,
+        "is_direct" :  true,
+        "is_diff" : false
     }
 }

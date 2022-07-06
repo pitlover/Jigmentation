@@ -141,14 +141,11 @@ def build_optimizer(main_params, linear_params, cluster_params, opt: dict, model
         else:
             raise ValueError(f"Unsupported optimizer type {net_optimizer_type}.")
 
-        if "stego" in model_type:
-            linear_probe_optimizer_type = opt["linear"]["name"].lower()
-            if linear_probe_optimizer_type == "adam":
-                linear_probe_optimizer = Adam(linear_params, lr=opt["linear"]["lr"])
-            else:
-                raise ValueError(f"Unsupported optimizer type {linear_probe_optimizer_type}.")
+        linear_probe_optimizer_type = opt["linear"]["name"].lower()
+        if linear_probe_optimizer_type == "adam":
+            linear_probe_optimizer = Adam(linear_params, lr=opt["linear"]["lr"])
         else:
-            linear_probe_optimizer = None
+            raise ValueError(f"Unsupported optimizer type {linear_probe_optimizer_type}.")
 
         cluster_probe_optimizer_type = opt["cluster"]["name"].lower()
         if cluster_probe_optimizer_type == "adam":

@@ -79,7 +79,7 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
                                                          is_direct=opt["eval"]["is_direct"])  # CPU model
 
     if opt["loss"].get("vectorquantize_weight", 0) != 0:
-        vq_model = VectorQuantizer(opt=opt["loss"]["vq_loss"])
+        vq_model = VectorQuantizer(opt=opt["loss"]["vq_loss"], embedding_dim=opt["model"]["dim"])
     else:
         vq_model = nn.Identity
     criterion = build_criterion(n_classes=val_dataset.n_classes,
@@ -220,8 +220,7 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
             batch_size = img.shape[0]
             if i % num_accum == 0:
                 net_optimizer.zero_grad(set_to_none=True)
-                if opt["loss"]["vectorquantize_weight"] == 0:
-                    linear_probe_optimizer.zero_grad(set_to_none=True)
+                linear_probe_optimizer.zero_grad(set_to_none=True)
                 cluster_probe_optimizer.zero_grad(set_to_none=True)
 
             model_input = (img, label)
@@ -274,9 +273,7 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
 
                 g_norm = nn.utils.clip_grad_norm_(net_model.parameters(), grad_norm)
                 net_optimizer.step()
-                if opt["loss"]["vectorquantize_weight"] == 0:
-                    linear_probe_optimizer.step()
-
+                linear_probe_optimizer.step()
                 cluster_probe_optimizer.step()
                 current_iter += 1
 
