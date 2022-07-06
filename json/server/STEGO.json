@@ -1,11 +1,11 @@
 {
-    "gpu_ids": [0, 1, 2, 3],
+    "gpu_ids": [1, 2, 3],
     "output_dir": "./output/",
     "checkpoint": "",
     "wandb": {
         "project": "Jigmentation",
         "entity": "00310214aa-",
-        "name": "JIRANO_vq",
+        "name": "STEGO_direct",
         "mode": "online"
     },
     "dataset": {
@@ -19,13 +19,13 @@
     },
     "dataloader": {
         "batch_size": 32,
-        "num_workers": 0
+        "num_workers": 30
     },
     "model": {
         "name": "STEGO",
         "arch" : "dino",
         "continuous" : true,
-        "dim" : 70,
+        "dim" : 384,
         "extra_clusters" : 0,
         "bn_momentum" : null,
         "bn_eps" : null,
@@ -35,7 +35,7 @@
             "dino_patch_size": 8,
             "dino_feat_type" : "feat",
             "pretrained_weights" : null,
-            "projection_type" : "nonlinear",
+            "projection_type" : null,
             "dropout" : true
         }
     },
@@ -46,7 +46,7 @@
         "stabilize" : false,
         "feature_samples" : 11,
         "neg_samples" : 5,
-        "correspondence_weight" : 1.0,
+        "correspondence_weight" : 0.0,
         "corr_loss" : {
             "neg_inter_weight": 0.63,
             "pos_inter_weight": 0.25,
@@ -55,7 +55,7 @@
             "pos_inter_shift": 0.02,
             "pos_intra_shift": 0.08
         },
-        "vectorquantize_weight" : 1.0,
+        "vectorquantize_weight" : 0.0,
         "vq_loss" : {
             "e_weight" : 0.25
         }
@@ -78,8 +78,8 @@
     "scheduler": {
     },
     "train": {
-        "print_freq": 1,
-        "valid_freq": 1,
+        "print_freq": 25,
+        "valid_freq": 100,
         "epoch" : 1,
         "freeze_encoder_bn" : false,
         "freeze_all_bn" : -1,
@@ -90,6 +90,8 @@
     "eval": {
         "extra_clusters" : 0,
         "n_images": 5,
-        "is_crf" : true
+        "is_crf" : true,
+        "is_direct" :  false,
+        "is_visualize" : false
     }
 }

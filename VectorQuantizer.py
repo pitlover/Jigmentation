@@ -17,7 +17,7 @@ class VectorQuantizer(nn.Module):
         # TODO initialize maybe SVD?
         nn.init.xavier_normal_(self.embedding.weight)
 
-    def forward(self, inputs: torch.Tensor):
+    def forward(self, inputs: torch.Tensor, is_diff: bool = False):
         # inputs : (b, 70, 28, 28)
         inputs = inputs.permute(0, 2, 3, 1).contiguous()  # (b, 28, 28, 70)
         input_shape = inputs.shape
@@ -36,11 +36,15 @@ class VectorQuantizer(nn.Module):
 
         # loss
         e_latent_loss = F.mse_loss(quantized.detach(), inputs)  # TODO momentum update
-        q_latent_loss = F.mse_loss(quantized, inputs.detach())
+        q_latent_loss = F.mse_loss(quantized, inputs.detach())  # TODO learnable vs EMA -> remove
+
         loss = q_latent_loss + self.e_weight * e_latent_loss
 
         quantized = inputs + (quantized - inputs).detach()  # TODO argmin gradient
         vq_dict = {"e_vq": e_latent_loss, "q_vq": q_latent_loss}
 
-        return loss, distances.view(input_shape[0], input_shape[1], input_shape[2], self.K).permute(0, 3, 1, 2).contiguous(), vq_dict
-        # return loss, quantized.permute(0, 3, 1, 2).contiguous(), vq_dict
+        if is_diff:
+            return loss, distances.view(input_shape[0], input_shape[1], input_shape[2], self.K).permute(0, 3, 1,
+                                                                                                        2).contiguous(), vq_dict
+        else:
+            return loss, quantized.permute(0, 3, 1, 2).contiguous(), vq_dict

@@ -1,4 +1,3 @@
-# TODO visualization code needs
 import torch.nn.functional as F
 import numpy as np
 import os
@@ -21,7 +20,8 @@ def prep_for_plot(img, rescale=True, resize=None):
     return plot_img
 
 
-def visualization(save_dir: str, dataset_type: str, saved_data: defaultdict, cluster_metrics: UnsupervisedMetrics, is_label : bool = False):
+def visualization(save_dir: str, dataset_type: str, saved_data: defaultdict, cluster_metrics: UnsupervisedMetrics,
+                  is_label: bool = False):
     os.makedirs(join(save_dir, "label"), exist_ok=True)
     os.makedirs(join(save_dir, "cluster"), exist_ok=True)
 

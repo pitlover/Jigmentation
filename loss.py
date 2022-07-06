@@ -12,7 +12,7 @@ def norm(t):
     return F.normalize(t, dim=1, eps=1e-10)
 
 
-def sample(t: torch.Tensor, coords: torch.Tensor):  # TODO grid_sample
+def sample(t: torch.Tensor, coords: torch.Tensor):
     return F.grid_sample(t, coords.permute(0, 2, 1, 3), padding_mode='border', align_corners=True)
 
 
@@ -29,7 +29,7 @@ class JiranoLoss(nn.Module):
                  n_classes: int,
                  cfg: dict,
                  corr_weight: float = 0.0,
-                 vq_weight : float = 0.0):
+                 vq_weight: float = 0.0):
         super().__init__()
 
         self.n_classes = n_classes
@@ -39,10 +39,10 @@ class JiranoLoss(nn.Module):
         self.vq_weight = vq_weight
 
     def forward(self, model_input, model_output, model_pos_output=None,
-                vq_output : torch.Tensor() = None,
+                vq_output: torch.Tensor() = None,
                 linear_output: torch.Tensor() = None,
                 cluster_output: torch.Tensor() = None) \
-            -> Tuple[torch.Tensor, Dict[str, float]]:
+            -> Tuple[torch.Tensor, Dict[str, float], Dict[str, float], Dict[str, float]]:
         img, label = model_input
         feats, code = model_output
 
@@ -59,7 +59,7 @@ class JiranoLoss(nn.Module):
         loss = (corr_loss * self.corr_weight) + (vq_loss * self.vq_weight) + linear_loss + cluster_loss
         loss_dict = {"loss": loss.item(),
                      "corr": corr_loss.item(),
-                     "vq" : vq_loss.item(),
+                     "vq": vq_loss.item(),
                      "linear": linear_loss.item(),
                      "cluster": cluster_loss.item()}
 
@@ -198,4 +198,3 @@ class LinearLoss(nn.Module):
         linear_loss = self.linear_loss(linear_logits[mask], flat_label[mask]).mean()
 
         return linear_loss
-

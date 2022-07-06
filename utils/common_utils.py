@@ -151,10 +151,12 @@ class RunningAverageDict:
 
 class Timer:
     def __init__(self):
-        self._now = time.process_time_ns()
+        self._now = time.process_time()
+        # self._now = time.process_time_ns()
 
     def update(self) -> float:
-        current = time.process_time_ns()
+        current = time.process_time()
+        # current = time.process_time_ns()
         duration = current - self._now
         self._now = current
         return duration / 1e6  # ms

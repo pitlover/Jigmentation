@@ -1,0 +1,8 @@
+wandb
+torch
+torchvision
+torchmetrics
+scipy
+tqdm
+pydensecrf
+pytorch_lightning

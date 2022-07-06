@@ -1,3 +1,4 @@
+import time
 from typing import Dict, Tuple
 import argparse
 from functools import partial
@@ -74,7 +75,8 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
 
     # -------------------------- Define -------------------------------#
     net_model, linear_model, cluster_model = build_model(opt=opt["model"],
-                                                         n_classes=val_dataset.n_classes)  # CPU model
+                                                         n_classes=val_dataset.n_classes,
+                                                         is_direct=opt["eval"]["is_direct"])  # CPU model
 
     if opt["loss"].get("vectorquantize_weight", 0) != 0:
         vq_model = VectorQuantizer(opt=opt["loss"]["vq_loss"])
@@ -204,7 +206,7 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
         train_stats.reset()
         _ = timer.update()
 
-        for i, data in enumerate(train_loader):  ## here
+        for i, data in enumerate(train_loader):
             img: torch.Tensor = data['img'].to(device, non_blocking=True)
             img_pos: torch.Tensor = data['img_pos'].to(device, non_blocking=True)
             label: torch.Tensor = data['label'].to(device, non_blocking=True)
@@ -226,22 +228,23 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
             model_output = net_model(img)  # feats : (b, 384, 28, 28) codes : (b, 70, 28, 28)
 
             if opt["loss"]["vectorquantize_weight"] > 0:
-                vq_output = vq_model(model_output[1])  # loss, codes, vq_dict
+                vq_output = vq_model(model_output[1], is_diff=opt["eval"]["is_diff"])  # loss, codes, vq_dict
                 detached_code = torch.clone(vq_output[1].detach())
+                model_pos_output = net_model(img_pos)
 
-                # TODO is_direct_metric ? should be (27, 28, 28)
                 linear_output = linear_model(detached_code)
-                cluster_output = cluster_model(detached_code, None, is_direct=True)  # cluster_loss, cluster_probs
+
+                cluster_output = cluster_model(detached_code, None,
+                                               is_direct=opt["eval"]["is_direct"])  # cluster_loss, cluster_probs
 
                 loss, loss_dict, corr_dict, vq_dict = criterion(model_input=model_input,
                                                                 model_output=model_output,
+                                                                model_pos_output=model_pos_output,
                                                                 vq_output=vq_output,
                                                                 linear_output=linear_output,
                                                                 cluster_output=cluster_output)
-
             else:
                 detached_code = torch.clone(model_output[1].detach())
-                vq_model = None
                 linear_output = linear_model(detached_code)
                 cluster_output = cluster_model(detached_code, None, is_direct=False)  # cluster_loss, cluster_probs
 
@@ -451,12 +454,12 @@ def evaluate(net_model: nn.Module,
             img_path: str = data['img_path']
 
             feats, code = net_model(img)
-            opt["is_direct"] = False
+
+            # vector quantization version
             if vq_model != nn.Identity:
                 vq_model.eval()
-                vq_output = vq_model(code)
+                vq_output = vq_model(code, is_diff=opt["is_diff"])
                 code = vq_output[1]
-                opt["is_direct"] = True
 
             code = F.interpolate(code, label.shape[-2:], mode='bilinear', align_corners=False)
 
@@ -488,7 +491,7 @@ def evaluate(net_model: nn.Module,
         return eval_stats.avg, eval_metrics
 
 
-if __name__ == "__main__":
+def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--opt", type=str, required=True, help="Path to option JSON file.")
     parser.add_argument("--test", action="store_true", help="Test mode, no WandB, highest priority.")
@@ -504,3 +507,7 @@ if __name__ == "__main__":
         parser_opt["dataset"]["data_path"] = parser_args.data_path
 
     run(parser_opt, is_test=parser_args.test, is_debug=parser_args.debug)
+
+
+if __name__ == "__main__":
+    main()

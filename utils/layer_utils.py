@@ -16,7 +16,7 @@ class ClusterLookup(nn.Module):
             self.clusters.copy_(torch.randn(self.n_classes, self.dim))
 
     def forward(self, x, alpha, log_probs=False, is_direct=False):  # feats, code
-        if is_direct:  # TODO directly convert to softmax
+        if is_direct:
             inner_products = x # (b, n_class, h, w)
         else:
             normed_clusters = F.normalize(self.clusters, dim=1)  # (b, dim, h, w)

@@ -11,7 +11,7 @@ from torchvision import transforms as T
 from loss import *
 
 
-def build_model(opt: dict, n_classes: int = 27):
+def build_model(opt: dict, n_classes: int = 27, is_direct: bool = False):
     # opt = opt["model"]
     model_type = opt["name"].lower()
 
@@ -48,9 +48,12 @@ def build_model(opt: dict, n_classes: int = 27):
             n_classes=n_classes
         )
         net_model = model.net
-        linear_model = nn.Identity()
-        cluster_model = model.cluster_probe
 
+        if is_direct:
+            linear_model = nn.Identity()
+        else:
+            linear_model = model.linear_probe
+        cluster_model = model.cluster_probe
     elif model_type == "dino":
         model = nn.Sequential(
             DinoFeaturizer(20, opt),  # dim doesnt matter
@@ -84,12 +87,12 @@ def build_criterion(n_classes: int, opt: dict):
     if "stego" in loss_name:
         loss = StegoLoss(n_classes=n_classes, cfg=opt, corr_weight=opt["correspondence_weight"])
     elif "jirano" in loss_name:
-        loss = JiranoLoss(n_classes=n_classes, cfg= opt, corr_weight=opt["correspondence_weight"], vq_weight=opt["vectorquantize_weight"])
+        loss = JiranoLoss(n_classes=n_classes, cfg=opt, corr_weight=opt["correspondence_weight"],
+                          vq_weight=opt["vectorquantize_weight"])
     else:
         raise ValueError(f"Unsupported loss type {loss_name}")
 
     return loss
-
 
 
 def split_params_for_optimizer(model, opt):
@@ -271,4 +274,5 @@ def build_dataloader(dataset,
             num_workers=(opt.get("num_workers", 4) + world_size - 1) // world_size,
             pin_memory=pin_memory,
             sampler=ddp_sampler,
+            prefetch_factor=opt.get("prefetch_factor", 1)
         )
