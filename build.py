@@ -128,7 +128,7 @@ def split_params_for_optimizer(model, opt):
     return params_for_optimizer
 
 
-def build_optimizer(main_params, linear_params, cluster_params, opt: dict, model_type: str):
+def build_optimizer(main_params, linear_params, cluster_params, vq_params, momentum_type, opt: dict, model_type: str):
     # opt = opt["optimizer"]
     model_type = model_type.lower()
 
@@ -153,7 +153,15 @@ def build_optimizer(main_params, linear_params, cluster_params, opt: dict, model
         else:
             raise ValueError(f"Unsupported optimizer type {cluster_probe_optimizer_type}.")
 
-        return net_optimizer, linear_probe_optimizer, cluster_probe_optimizer
+        vq_probe_optimizer_type = opt["vq"]["name"].lower()
+        if momentum_type is not None:
+            vq_probe_optimizer = None
+        elif vq_probe_optimizer_type == "adam":
+            vq_probe_optimizer = Adam(vq_params, lr=opt["vq"]["lr"])
+        else:
+            raise ValueError(f"Unsupported optimizer type {cluster_probe_optimizer_type}.")
+
+        return net_optimizer, linear_probe_optimizer, cluster_probe_optimizer, vq_probe_optimizer
 
     else:
         raise ValueError("No model: {} found".format(model_type))

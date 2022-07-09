@@ -12,7 +12,7 @@ from torch.utils.data.dataloader import DataLoader
 import wandb
 import os
 from tqdm import tqdm
-from VectorQuantizer import VectorQuantizer
+from VectorQuantizer import VectorQuantizer, MomentumVectorQuantize
 from utils.common_utils import (save_checkpoint, parse, dprint, time_log, compute_param_norm,
                                 freeze_bn, zero_grad_bn, RunningAverage, Timer)
 from utils.dist_utils import all_reduce_dict
@@ -78,8 +78,11 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
                                                          n_classes=val_dataset.n_classes,
                                                          is_direct=opt["eval"]["is_direct"])  # CPU model
 
-    if opt["loss"].get("vectorquantize_weight", 0) != 0:
-        vq_model = VectorQuantizer(opt=opt["loss"]["vq_loss"], embedding_dim=opt["model"]["dim"])
+    if opt["loss"].get("vectorquantize_weight", 0) > 0:
+        if opt["loss"]["vq_loss"]["is_momentum_type"] != None:
+            vq_model = MomentumVectorQuantize(opt=opt["loss"]["vq_loss"], embedding_dim=opt["model"]["dim"])
+        else:
+            vq_model = VectorQuantizer(opt=opt["loss"]["vq_loss"], embedding_dim=opt["model"]["dim"])
     else:
         vq_model = nn.Identity
     criterion = build_criterion(n_classes=val_dataset.n_classes,
@@ -89,6 +92,7 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
     net_model = net_model.to(device)
     linear_model = linear_model.to(device)
     cluster_model = cluster_model.to(device)
+    vq_model = vq_model.to(device)
     criterion = criterion.to(device)
 
     # ----------------------- Distributed ----------------------------#
@@ -113,14 +117,16 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
 
     # ------------------- Optimizer  -----------------------#
     if is_train:
-        net_optimizer, linear_probe_optimizer, cluster_probe_optimizer = build_optimizer(
+        net_optimizer, linear_probe_optimizer, cluster_probe_optimizer, vq_probe_optimizer = build_optimizer(
             main_params=model_m.parameters(),
             linear_params=linear_model.parameters(),
             cluster_params=cluster_model.parameters(),
+            vq_params=vq_model.parameters(),
+            momentum_type=opt["loss"]["vq_loss"]["is_momentum_type"],
             opt=opt["optimizer"],
             model_type=opt["wandb"]["name"])
     else:
-        net_optimizer, linear_probe_optimizer, cluster_probe_optimizer = None, None, None
+        net_optimizer, linear_probe_optimizer, cluster_probe_optimizer, vq_probe_optimizer = None, None, None, None
 
     # --------------------------- Load --------------------------------#
     if opt['checkpoint']:  # resume case
@@ -129,12 +135,13 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
         net_model.load_state_dict(checkpoint['net_model_state_dict'], strict=True)
         linear_model.load_state_dict(checkpoint['linear_model_state_dict'], strict=True)
         cluster_model.load_state_dict(checkpoint['cluster_model_state_dict'], strict=True)
-        if opt["loss"].get("vectorquantize_weight", 0) != 0:
+        if opt["loss"].get("vectorquantize_weight", 0) > 0:
             vq_model.load_state_dict(checkpoint['vq_model_state_dict'], strict=True)
         if is_train:
             net_optimizer.load_state_dict(checkpoint['net_optimizer_state_dict'])
             linear_probe_optimizer.load_state_dict(checkpoint['linear_optimizer_state_dict'])
             cluster_probe_optimizer.load_state_dict(checkpoint['cluster_optimizer_state_dict'])
+            vq_probe_optimizer.load_state_dict(checkpoint['cluster_optimizer_state_dict'])
 
         start_epoch = max(checkpoint.get('epoch', 0), 0)
         current_iter = max(checkpoint.get('iter', 0), 0)
@@ -222,17 +229,18 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
                 net_optimizer.zero_grad(set_to_none=True)
                 linear_probe_optimizer.zero_grad(set_to_none=True)
                 cluster_probe_optimizer.zero_grad(set_to_none=True)
+                if vq_probe_optimizer is not None:
+                    vq_probe_optimizer.zero_grad(set_to_none=True)
 
             model_input = (img, label)
             model_output = net_model(img)  # feats : (b, 384, 28, 28) codes : (b, 70, 28, 28)
 
             if opt["loss"]["vectorquantize_weight"] > 0:
-                vq_output = vq_model(model_output[1], is_diff=opt["eval"]["is_diff"])  # loss, codes, vq_dict
+                vq_output = vq_model(model_output[1], iteration=current_iter,
+                                     is_diff=opt["eval"]["is_diff"])  # loss, codes, vq_dict
                 detached_code = torch.clone(vq_output[1].detach())
                 model_pos_output = net_model(img_pos)
-
                 linear_output = linear_model(detached_code)
-
                 cluster_output = cluster_model(detached_code, None,
                                                is_direct=opt["eval"]["is_direct"])  # cluster_loss, cluster_probs
 
@@ -275,6 +283,8 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
                 net_optimizer.step()
                 linear_probe_optimizer.step()
                 cluster_probe_optimizer.step()
+                if vq_probe_optimizer is not None:
+                    vq_probe_optimizer.step()
                 current_iter += 1
 
             backward_time = timer.update()
@@ -312,7 +322,7 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
                         "iters": current_iter,
                         "train_loss": loss_dict['loss'],
                         "STEGO_loss": loss_dict["corr"],
-                        "lr": net_optimizer.param_groups[0]['lr'],
+                        "net_lr": net_optimizer.param_groups[0]['lr'],
                         "param_norm": p_norm.item(),
                         "grad_norm": g_norm.item(),
                     })
@@ -342,9 +352,10 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
                     s += f"[VAL] -------- updated ({metric})! {prev_best_metric:.6f} -> {best_metric:.6f}\n"
                     if is_master:
                         save_checkpoint(
-                            "best", net_model, net_optimizer, vq_model, linear_model, linear_probe_optimizer,
-                            cluster_model,
-                            cluster_probe_optimizer,
+                            "best", net_model, net_optimizer,
+                            vq_model, vq_probe_optimizer,
+                            linear_model, linear_probe_optimizer,
+                            cluster_model, cluster_probe_optimizer,
                             current_epoch, current_iter, best_metric, wandb_save_dir, model_only=True)
                     for metric_k, metric_v in valid_metrics.items():
                         s += f"[VAL] {metric_k} : {best_valid_metrics[metric_k]:.6f} -> {metric_v:.6f}\n"
@@ -372,9 +383,10 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
 
         # --------------------------- Save --------------------------------#
         if is_master:
-            save_checkpoint("latest", net_model, net_optimizer, vq_model, linear_model, linear_probe_optimizer,
-                            cluster_model,
-                            cluster_probe_optimizer,
+            save_checkpoint("latest", net_model, net_optimizer,
+                            vq_model, vq_probe_optimizer,
+                            linear_model, linear_probe_optimizer,
+                            cluster_model, cluster_probe_optimizer,
                             current_epoch, current_iter, best_metric, wandb_save_dir,
                             best_epoch=best_epoch, best_iter=best_iter, model_only=False)
 
@@ -384,6 +396,7 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
     net_model.load_state_dict(best_checkpoint['net_model_state_dict'], strict=True)
     linear_model.load_state_dict(best_checkpoint['linear_model_state_dict'], strict=True)
     cluster_model.load_state_dict(best_checkpoint['cluster_model_state_dict'], strict=True)
+    vq_model.load_state_dict(best_checkpoint['vq_model_state_dict'], strict=True)
     best_loss, best_metrics = evaluate(
         net_model, vq_model, linear_model, cluster_model, val_loader, device=device, opt=opt["eval"],
         n_classes=train_dataset.n_classes, is_crf=opt["eval"]["is_crf"])
@@ -402,6 +415,7 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
     net_model.load_state_dict(latest_checkpoint['net_model_state_dict'], strict=True)
     linear_model.load_state_dict(latest_checkpoint['linear_model_state_dict'], strict=True)
     cluster_model.load_state_dict(latest_checkpoint['cluster_model_state_dict'], strict=True)
+    vq_model.load_state_dict(best_checkpoint['vq_model_state_dict'], strict=True)
     best_loss, best_metrics = evaluate(
         net_model, vq_model, linear_model, cluster_model, val_loader, device=device, opt=opt["eval"],
         n_classes=train_dataset.n_classes)
@@ -478,6 +492,7 @@ def evaluate(net_model: nn.Module,
                 from visualize import visualization
                 saved_data["img_path"].append("".join(img_path))
                 saved_data["cluster_preds"].append(cluster_preds.cpu().squeeze(0))
+                saved_data["linear_preds"].append(linear_preds.cpu().squeeze(0))
                 saved_data["label"].append(label.cpu().squeeze(0))
 
         eval_metrics = get_metrics(cluster_metrics, linear_metrics)

@@ -22,8 +22,10 @@ def prep_for_plot(img, rescale=True, resize=None):
 
 def visualization(save_dir: str, dataset_type: str, saved_data: defaultdict, cluster_metrics: UnsupervisedMetrics,
                   is_label: bool = False):
-    os.makedirs(join(save_dir, "label"), exist_ok=True)
+    if is_label:
+        os.makedirs(join(save_dir, "label"), exist_ok=True)
     os.makedirs(join(save_dir, "cluster"), exist_ok=True)
+    os.makedirs(join(save_dir, "linear"), exist_ok=True)
 
     if dataset_type.startswith("cityscapes"):
         label_cmap = create_cityscapes_colormap()
@@ -38,3 +40,6 @@ def visualization(save_dir: str, dataset_type: str, saved_data: defaultdict, clu
 
         plot_cluster = (label_cmap[cluster_metrics.map_clusters(saved_data["cluster_preds"][index])]).astype(np.uint8)
         Image.fromarray(plot_cluster).save(join(join(save_dir, "cluster", file_name + ".png")))
+
+        plot_linear = (label_cmap[saved_data["linear_preds"][index]]).astype(np.uint8)
+        Image.fromarray(plot_linear).save(join(join(save_dir, "linear", file_name + ".png")))

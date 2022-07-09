@@ -1,11 +1,11 @@
 {
-    "gpu_ids": [0],
+    "gpu_ids": [2],
     "output_dir": "./output/",
     "checkpoint": "",
     "wandb": {
         "project": "Jigmentation",
         "entity": "00310214aa-",
-        "name": "JIRANO_128_1024",
+        "name": "JIRANO_2_1024_manageloss",
         "mode": "online"
     },
     "dataset": {
@@ -25,7 +25,7 @@
         "name": "JIRANO",
         "arch": "dino",
         "continuous": true,
-        "dim": 128,
+        "dim": 70,
         "extra_clusters": 0,
         "bn_momentum": null,
         "bn_eps": null,
@@ -62,8 +62,7 @@
             "max_decay_momentum": 0.99,
             "min_decay_momentum": 0.01,
             "is_momentum_type": null,
-            "steps" : 1000,
-            "manage_weight" : 0.0,
+            "manage_weight" : 0.01,
             "inter_weight" : 1.0
         }
     },
@@ -103,6 +102,6 @@
         "is_crf": true,
         "is_visualize": false,
         "is_direct": false,
-        "is_diff" : false
+        "is_diff": false
     }
 }

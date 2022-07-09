@@ -11,7 +11,7 @@ from collections import OrderedDict
 
 def save_checkpoint(prefix: str,
                     net_model, net_optimizer,
-                    vq_model,
+                    vq_model, vq_optimizer,
                     linear_model, linear_optimizer,
                     cluster_model, cluster_optimizer,
                     current_epoch, current_iter,
@@ -26,6 +26,8 @@ def save_checkpoint(prefix: str,
         linear_model = linear_model.module
     if isinstance(cluster_model, DistributedDataParallel):
         cluster_model = cluster_model.module
+    if isinstance(vq_model, DistributedDataParallel):
+        vq_model = vq_model.module
 
     torch.save(
         {
@@ -35,7 +37,8 @@ def save_checkpoint(prefix: str,
             'best_iter': best_iter if (best_iter is not None) else current_iter,
             'net_model_state_dict': net_model.state_dict(),
             'net_optimizer_state_dict': net_optimizer.state_dict() if (not model_only) else None,
-            'vq_model_state_dict': linear_model.state_dict(),
+            'vq_model_state_dict': vq_model.state_dict(),
+            'vq_optimizer_state_dict': vq_optimizer.state_dict() if (not model_only) else None,
             'linear_model_state_dict': linear_model.state_dict(),
             'linear_optimizer_state_dict': linear_optimizer.state_dict() if (not model_only) else None,
             'cluster_model_state_dict': cluster_model.state_dict(),

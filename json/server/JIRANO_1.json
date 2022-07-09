@@ -1,11 +1,11 @@
 {
-    "gpu_ids": [3],
+    "gpu_ids": [1],
     "output_dir": "./output/",
     "checkpoint": "",
     "wandb": {
         "project": "Jigmentation",
         "entity": "00310214aa-",
-        "name": "JIRANO_vq2d_128_70",
+        "name": "JIRANO_1_normalize_1024",
         "mode": "online"
     },
     "dataset": {
@@ -25,7 +25,7 @@
         "name": "JIRANO",
         "arch": "dino",
         "continuous": true,
-        "dim": 128,
+        "dim": 70,
         "extra_clusters": 0,
         "bn_momentum": null,
         "bn_eps": null,
@@ -40,7 +40,7 @@
         }
     },
     "loss": {
-        "name": "jirano",
+        "name": "JIRANO",
         "zero_clamp": true,
         "pointwise": true,
         "stabilize": false,
@@ -58,8 +58,10 @@
         "vectorquantize_weight": 1.0,
         "vq_loss": {
             "e_weight": 0.25,
-            "embedding_dim": 128,
-            "K": 70
+            "K": 1024,
+            "max_decay_momentum": 0.99,
+            "min_decay_momentum": 0.01,
+            "is_momentum_type": null
         }
     },
     "optimizer": {
@@ -75,6 +77,10 @@
         "cluster": {
             "name": "adam",
             "lr": 5e-3
+        },
+        "vq": {
+            "name": "adam",
+            "lr": 5e-3
         }
     },
     "scheduler": {
@@ -82,7 +88,7 @@
     "train": {
         "print_freq": 25,
         "valid_freq": 100,
-        "epoch": 2,
+        "epoch": 1,
         "freeze_encoder_bn": false,
         "freeze_all_bn": -1,
         "num_accum": 1,
@@ -94,6 +100,6 @@
         "is_crf": true,
         "is_visualize": false,
         "is_direct": false,
-        "is_diff" : false
+        "is_diff": false
     }
 }
