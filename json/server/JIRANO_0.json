@@ -5,7 +5,8 @@
     "wandb": {
         "project": "Jigmentation",
         "entity": "00310214aa-",
-        "name": "JIRANO_0_70_54_wd2_1024",
+        "name": "JIRANO_70_1024_weightsum_manageloss",
+        "memo": "70_1024_weightsum_manageloss1:1",
         "mode": "online"
     },
     "dataset": {
@@ -61,7 +62,12 @@
             "K": 1024,
             "max_decay_momentum": 0.99,
             "min_decay_momentum": 0.01,
-            "is_momentum_type": null
+            "is_momentum_type": null,
+            "manage_weight": 1.0,
+            "intra_weight": 1.0,
+            "inter_weight": 1.0,
+            "is_weight_sum" : true,
+            "topK_weight_sum": 0
         }
     },
     "optimizer": {
@@ -100,6 +106,7 @@
         "is_crf": true,
         "is_visualize": false,
         "is_direct": false,
-        "is_diff" : false
+        "is_diff" : false,
+        "linear_sep" : false
     }
 }

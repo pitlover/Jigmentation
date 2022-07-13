@@ -5,7 +5,8 @@
     "wandb": {
         "project": "Jigmentation",
         "entity": "00310214aa-",
-        "name": "JIRANO_2_1024_manageloss",
+        "name": "JIRANO_1_1024_linear_softmax10",
+        "memo": "stego:vq:intra:inter=1:1:1:0_linearseparate_softmax10",
         "mode": "online"
     },
     "dataset": {
@@ -62,8 +63,11 @@
             "max_decay_momentum": 0.99,
             "min_decay_momentum": 0.01,
             "is_momentum_type": null,
-            "manage_weight" : 0.01,
-            "inter_weight" : 1.0
+            "manage_weight" : 1.0,
+            "intra_weight": 0.0,
+            "inter_weight" : 1.0,
+            "is_weight_sum" : true,
+            "topK_weight_sum": 10
         }
     },
     "optimizer": {
@@ -102,6 +106,7 @@
         "is_crf": true,
         "is_visualize": false,
         "is_direct": false,
-        "is_diff": false
+        "is_diff": false,
+        "linear_sep" : true
     }
 }

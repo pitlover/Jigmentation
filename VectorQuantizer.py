@@ -10,12 +10,12 @@ class VectorQuantizer(nn.Module):
                  ):
         super().__init__()
 
+        self.opt = opt
         self.embedding_dim = embedding_dim
         self.K = opt["K"]
         self.e_weight = opt["e_weight"]
         self.update_index = torch.zeros(self.K)
         self.manage_weight = opt["manage_weight"]
-
 
         self.embedding = nn.Embedding(self.K, self.embedding_dim).cuda()
         # TODO initialize maybe SVD?
@@ -26,7 +26,7 @@ class VectorQuantizer(nn.Module):
         inputs = inputs.permute(0, 2, 3, 1).contiguous()  # (b, 28, 28, 70)
 
         # normalize L2 norm
-        inputs = F.normalize(inputs, dim=-1)
+        # inputs = F.normalize(inputs, dim=-1)
         input_shape = inputs.shape
 
         flat_input = inputs.view(-1, self.embedding_dim)  # (b * 28 * 28, 70)
@@ -47,38 +47,54 @@ class VectorQuantizer(nn.Module):
             avg_entropy = torch.sum(avg_entropy, dim=-1)  # (1,)
             self.inter_loss = -avg_entropy  # maximization
 
-        # encoding
-        encoding_indices = torch.argmin(distances, dim=1).unsqueeze(1)  # (b * 28 * 28, 1)
+        encodings = torch.zeros(distances.shape[0], self.K, device=inputs.device)  # (b * 28 * 28, K)
 
-        # TODO need to optimize
-        for x in encoding_indices:
-            self.update_index[x] += 1
+        if self.opt["is_weight_sum"]:
+            # quantize and unflatten
+            if self.opt["topK_weight_sum"] > 0:
+                encodings_value, encodings_indices = torch.topk(-distances, self.K // 10, dim=1, largest=True)
+                p = F.softmax(encodings_value, dim=1)  # 25088, 102
+                encodings = torch.scatter(encodings, dim=1, index=encodings_indices, src=p)
+                quantized = torch.matmul(encodings, self.embedding.weight)
+            else:
+                p = F.softmax(-distances, dim=1)
+                quantized = torch.matmul(p, self.embedding.weight)
 
-        encodings = torch.zeros(encoding_indices.shape[0], self.K, device=inputs.device)  # (b * 28 * 28, K)
-        encodings.scatter_(1, encoding_indices, 1)  # label one-hot vector
-        # quantize and unflatten
-        quantized = torch.matmul(encodings, self.embedding.weight)
-        quantized = quantized.view(input_shape)  # (b, 28, 28, dim)
+            quantized = quantized.view(input_shape)  # (b, 28, 28, dim)
+        else:
+            # encoding
+            encoding_indices = torch.argmin(distances, dim=1).unsqueeze(1)  # (b * 28 * 28, 1)
+
+            # # TODO need to optimize
+            # for x in encoding_indices:
+            #     self.update_index[x] += 1
+
+            encodings.scatter_(1, encoding_indices, 1)  # label one-hot vector
+            quantized = torch.matmul(encodings, self.embedding.weight)
+
+            quantized = quantized.view(input_shape)  # (b, 28, 28, dim)
 
         # loss
         q_latent_loss = F.mse_loss(inputs.detach(), quantized)
         e_latent_loss = F.mse_loss(inputs, quantized.detach())
 
         if self.manage_weight > 0:
-            loss = q_latent_loss + self.e_weight * e_latent_loss + self.manage_weight * (self.intra_loss + self.inter_loss)
+            loss = q_latent_loss + self.e_weight * e_latent_loss + self.manage_weight * (
+                    self.opt["intra_weight"] * self.intra_loss + self.opt["inter_weight"] * self.inter_loss)
             vq_dict = {"e_vq": e_latent_loss, "q_vq": q_latent_loss, "intra": self.intra_loss, "inter": self.inter_loss}
         else:
             loss = q_latent_loss + self.e_weight * e_latent_loss
             vq_dict = {"e_vq": e_latent_loss, "q_vq": q_latent_loss}
 
-        quantized = inputs + (quantized - inputs).detach()  # TODO argmin gradient
+        if not self.opt["is_weight_sum"]:
+            quantized = inputs + (quantized - inputs).detach()  # TODO argmin gradient
 
         if iteration is not None and iteration % 100 == 0:
             ratio = torch.div(self.update_index, sum(self.update_index))
             print("Memory Bank Status : ", self.update_index, sum(self.update_index))
             print("Ratio              : ", ratio)
-            print("Top10              : ", torch.topk(ratio, 5).values)
-            print("Bottom10           : ", torch.topk(ratio, 5, largest=False).values)
+            print("Top5              : ", torch.topk(ratio, 5).values)
+            print("Bottom5           : ", torch.topk(ratio, 5, largest=False).values)
 
         if is_diff:
             return loss, distances.view(input_shape[0], input_shape[1], input_shape[2], self.K).permute(0, 3, 1,

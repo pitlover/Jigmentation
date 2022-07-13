@@ -5,7 +5,8 @@
     "wandb": {
         "project": "Jigmentation",
         "entity": "00310214aa-",
-        "name": "JIRANO_1_normalize_1024",
+        "name": "JIRANO_1_1024_linear",
+        "memo": "stego:vq:intra:inter=1:1:1:0_linearseparate",
         "mode": "online"
     },
     "dataset": {
@@ -61,8 +62,14 @@
             "K": 1024,
             "max_decay_momentum": 0.99,
             "min_decay_momentum": 0.01,
-            "is_momentum_type": null
+            "is_momentum_type": null,
+            "manage_weight": 1.0,
+            "intra_weight": 1.0,
+            "inter_weight": 0.0,
+            "is_weight_sum" : true,
+            "topK_weight_sum": 0
         }
+
     },
     "optimizer": {
         "net": {
@@ -100,6 +107,7 @@
         "is_crf": true,
         "is_visualize": false,
         "is_direct": false,
-        "is_diff": false
+        "is_diff": false,
+        "linear_sep" : true
     }
 }

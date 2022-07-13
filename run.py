@@ -240,7 +240,12 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
                                      is_diff=opt["eval"]["is_diff"])  # loss, codes, vq_dict
                 detached_code = torch.clone(vq_output[1].detach())
                 model_pos_output = net_model(img_pos)
-                linear_output = linear_model(detached_code)
+
+                if opt["eval"]["linear_sep"]:
+                    head_detached_code = torch.clone(model_output[1].detach())
+                    linear_output = linear_model(head_detached_code)
+                else:
+                    linear_output = linear_model(detached_code)
                 cluster_output = cluster_model(detached_code, None,
                                                is_direct=opt["eval"]["is_direct"])  # cluster_loss, cluster_probs
 
@@ -464,23 +469,30 @@ def evaluate(net_model: nn.Module,
             label: torch.Tensor = data['label'].to(device, non_blocking=True)
             img_path: str = data['img_path']
 
-            feats, code = net_model(img)
+            feats, head_code = net_model(img)
 
             # vector quantization version
             if vq_model != nn.Identity:
                 vq_model.eval()
-                vq_output = vq_model(code, is_diff=opt["is_diff"])
+                vq_output = vq_model(head_code, is_diff=opt["is_diff"])
                 code = vq_output[1]
 
             code = F.interpolate(code, label.shape[-2:], mode='bilinear', align_corners=False)
+            head_code = F.interpolate(head_code, label.shape[-2:], mode='bilinear', align_corners=False)
 
             if is_crf:
-                linear_preds = torch.log_softmax(linear_model(code), dim=1)
+                if opt["linear_sep"]:
+                    linear_preds = torch.log_softmax(linear_model(head_code), dim=1)
+                else:
+                    linear_preds = torch.log_softmax(linear_model(code), dim=1)
                 cluster_loss, cluster_preds = cluster_model(code, 2, log_probs=True, is_direct=opt["is_direct"])
                 linear_preds = batched_crf(img, linear_preds).argmax(1).cuda()
                 cluster_preds = batched_crf(img, cluster_preds).argmax(1).cuda()
             else:
-                linear_preds = linear_model(code).argmax(1)
+                if opt["linear_sep"]:
+                    linear_preds = linear_model(head_code).argmax(1)
+                else:
+                    linear_preds = linear_model(code).argmax(1)
                 cluster_loss, cluster_preds = cluster_model(code, None, is_direct=opt["is_direct"])
                 cluster_preds = cluster_preds.argmax(1)
 
