@@ -5,8 +5,8 @@
     "wandb": {
         "project": "Jigmentation",
         "entity": "00310214aa-",
-        "name": "JIRANO_70_1024weightsum_revised",
-        "memo": "70_1024_weightsum_revised",
+        "name": "JIRANO_70_1024weightsum_intra25_inter75",
+        "memo": "70_1024_weightsum_intra25_inter75",
         "mode": "online"
     },
     "dataset": {
@@ -64,10 +64,11 @@
             "min_decay_momentum": 0.01,
             "is_momentum_type": null,
             "steps" : 0,
-            "manage_weight" : 0.0,
-            "inter_weight" : 0.0,
+            "manage_weight" : 1.0,
+            "intra_weight" : 0.25,
+            "inter_weight" : 0.75,
             "is_weight_sum" : true,
-            "topK_weight_sum": 10
+            "topK_weight_sum": 0
         }
     },
     "optimizer": {

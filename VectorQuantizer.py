@@ -52,26 +52,24 @@ class VectorQuantizer(nn.Module):
         if self.opt["is_weight_sum"]:
             # quantize and unflatten
             if self.opt["topK_weight_sum"] > 0:
-                encodings_value, encodings_indices = torch.topk(-distances, self.K // 10, dim=1, largest=True)
+                encodings_value, encodings_indices = torch.topk(-distances, self.K // self.opt["topK_weight_sum"], dim=1, largest=True)
                 p = F.softmax(encodings_value, dim=1)  # 25088, 102
                 encodings = torch.scatter(encodings, dim=1, index=encodings_indices, src=p)
                 quantized = torch.matmul(encodings, self.embedding.weight)
             else:
                 p = F.softmax(-distances, dim=1)
                 quantized = torch.matmul(p, self.embedding.weight)
-
             quantized = quantized.view(input_shape)  # (b, 28, 28, dim)
         else:
             # encoding
             encoding_indices = torch.argmin(distances, dim=1).unsqueeze(1)  # (b * 28 * 28, 1)
 
             # # TODO need to optimize
-            # for x in encoding_indices:
-            #     self.update_index[x] += 1
+            for x in encoding_indices:
+                self.update_index[x] += 1
 
             encodings.scatter_(1, encoding_indices, 1)  # label one-hot vector
             quantized = torch.matmul(encodings, self.embedding.weight)
-
             quantized = quantized.view(input_shape)  # (b, 28, 28, dim)
 
         # loss

@@ -5,8 +5,8 @@
     "wandb": {
         "project": "Jigmentation",
         "entity": "00310214aa-",
-        "name": "JIRANO_1_1024_linear",
-        "memo": "stego:vq:intra:inter=1:1:1:0_linearseparate",
+        "name": "JIRANO_1_1024_weightsum_intra",
+        "memo": "stego:vq:intra:inter=1:1:1:0",
         "mode": "online"
     },
     "dataset": {
@@ -108,6 +108,6 @@
         "is_visualize": false,
         "is_direct": false,
         "is_diff": false,
-        "linear_sep" : true
+        "linear_sep" : false
     }
 }

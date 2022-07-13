@@ -5,8 +5,8 @@
     "wandb": {
         "project": "Jigmentation",
         "entity": "00310214aa-",
-        "name": "JIRANO_3_70_1024_stego_vq_1_0.1",
-        "memo": "st:vq:intra:inter=1:0.1:0:0",
+        "name": "JIRANO_3_70_1024_weightsumstego_vq_1_1",
+        "memo": "weightsum_st:vq:intra:inter=1:1:1:1",
         "mode": "online"
     },
     "dataset": {
@@ -56,7 +56,7 @@
             "pos_inter_shift": 0.02,
             "pos_intra_shift": 0.08
         },
-        "vectorquantize_weight": 0.1,
+        "vectorquantize_weight": 1.0,
         "vq_loss": {
             "e_weight": 0.25,
             "K": 512,
@@ -64,9 +64,11 @@
             "min_decay_momentum": 0.01,
             "is_momentum_type": null,
             "steps" : 0,
-            "manage_weight" : 0.0,
-            "intra_weight" : 0.0,
-            "inter_weight" : 0.0
+            "manage_weight" : 1.0,
+            "intra_weight" : 1.0,
+            "inter_weight" : 1.0,
+            "is_weight_sum" : true,
+            "topK_weight_sum": 0
         }
     },
     "optimizer": {
@@ -105,6 +107,7 @@
         "is_crf": true,
         "is_visualize": false,
         "is_direct": false,
-        "is_diff" : false
+        "is_diff" : false,
+        "linear_sep" : false
     }
 }

@@ -5,8 +5,8 @@
     "wandb": {
         "project": "Jigmentation",
         "entity": "00310214aa-",
-        "name": "JIRANO_70_1024_weightsum_manageloss",
-        "memo": "70_1024_weightsum_manageloss1:1",
+        "name": "JIRANO_0_70_1024_manageloss",
+        "memo": "70_1024_manageloss1:1",
         "mode": "online"
     },
     "dataset": {
@@ -66,7 +66,7 @@
             "manage_weight": 1.0,
             "intra_weight": 1.0,
             "inter_weight": 1.0,
-            "is_weight_sum" : true,
+            "is_weight_sum" : false,
             "topK_weight_sum": 0
         }
     },
