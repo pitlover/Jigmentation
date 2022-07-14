@@ -5,8 +5,8 @@
     "wandb": {
         "project": "Jigmentation",
         "entity": "00310214aa-",
-        "name": "JIRANO_1_1024_weightsum_intra",
-        "memo": "stego:vq:intra:inter=1:1:1:0",
+        "name": "JIRANO_1_1024_weightsum_intra0.1",
+        "memo": "stego:vq:intra:inter=1:1:0.1:0",
         "mode": "online"
     },
     "dataset": {
@@ -64,7 +64,7 @@
             "min_decay_momentum": 0.01,
             "is_momentum_type": null,
             "manage_weight": 1.0,
-            "intra_weight": 1.0,
+            "intra_weight": 0.1,
             "inter_weight": 0.0,
             "is_weight_sum" : true,
             "topK_weight_sum": 0
