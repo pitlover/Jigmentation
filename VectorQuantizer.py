@@ -16,7 +16,6 @@ class VectorQuantizer(nn.Module):
         self.e_weight = opt["e_weight"]
         self.update_index = torch.zeros(self.K)
         self.manage_weight = opt["manage_weight"]
-
         self.embedding = nn.Embedding(self.K, self.embedding_dim).cuda()
         # TODO initialize maybe SVD?
         nn.init.xavier_normal_(self.embedding.weight)
@@ -52,7 +51,8 @@ class VectorQuantizer(nn.Module):
         if self.opt["is_weight_sum"]:
             # quantize and unflatten
             if self.opt["topK_weight_sum"] > 0:
-                encodings_value, encodings_indices = torch.topk(-distances, self.K // self.opt["topK_weight_sum"], dim=1, largest=True)
+                encodings_value, encodings_indices = torch.topk(-distances, self.K // self.opt["topK_weight_sum"],
+                                                                dim=1, largest=True)
                 p = F.softmax(encodings_value, dim=1)  # 25088, 102
                 encodings = torch.scatter(encodings, dim=1, index=encodings_indices, src=p)
                 quantized = torch.matmul(encodings, self.embedding.weight)

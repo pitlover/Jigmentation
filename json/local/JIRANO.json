@@ -5,8 +5,8 @@
     "wandb": {
         "project": "Jigmentation",
         "entity": "00310214aa-",
-        "name": "JIRANO_70_1024weightsum_intra25_inter75",
-        "memo": "70_1024_weightsum_intra25_inter75",
+        "name": "JIRANO_corrX_1024weightsum_e1",
+        "memo": "384_1024_weightsum_corrX",
         "mode": "online"
     },
     "dataset": {
@@ -47,7 +47,7 @@
         "stabilize": false,
         "feature_samples": 11,
         "neg_samples": 5,
-        "correspondence_weight": 1.0,
+        "correspondence_weight": 0.0,
         "corr_loss": {
             "neg_inter_weight": 0.63,
             "pos_inter_weight": 0.25,
@@ -58,13 +58,13 @@
         },
         "vectorquantize_weight": 1.0,
         "vq_loss": {
-            "e_weight": 0.25,
+            "e_weight": 1.0,
             "K": 1024,
             "max_decay_momentum": 0.99,
             "min_decay_momentum": 0.01,
             "is_momentum_type": null,
             "steps" : 0,
-            "manage_weight" : 1.0,
+            "manage_weight" : 0.0,
             "intra_weight" : 0.25,
             "inter_weight" : 0.75,
             "is_weight_sum" : true,
@@ -95,7 +95,7 @@
     "train": {
         "print_freq": 25,
         "valid_freq": 100,
-        "epoch": 1,
+        "epoch": 2,
         "freeze_encoder_bn": false,
         "freeze_all_bn": -1,
         "num_accum": 1,
