@@ -29,6 +29,10 @@ def save_checkpoint(prefix: str,
     if isinstance(vq_model, DistributedDataParallel):
         vq_model = vq_model.module
 
+    if vq_model != nn.Identity:
+        vq = vq_model.state_dict()
+    else:
+        vq = None
     torch.save(
         {
             'epoch': current_epoch,
@@ -37,7 +41,7 @@ def save_checkpoint(prefix: str,
             'best_iter': best_iter if (best_iter is not None) else current_iter,
             'net_model_state_dict': net_model.state_dict(),
             'net_optimizer_state_dict': net_optimizer.state_dict() if (not model_only) else None,
-            'vq_model_state_dict': vq_model.state_dict(),
+            'vq_model_state_dict': vq,
             'vq_optimizer_state_dict': vq_optimizer.state_dict() if (not model_only) else None,
             'linear_model_state_dict': linear_model.state_dict(),
             'linear_optimizer_state_dict': linear_optimizer.state_dict() if (not model_only) else None,

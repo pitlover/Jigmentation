@@ -1,11 +1,11 @@
 {
-    "gpu_ids": [1],
+    "gpu_ids": [0],
     "output_dir": "./output/",
     "checkpoint": "",
     "wandb": {
         "project": "Jigmentation",
         "entity": "00310214aa-",
-        "name": "STEGO_vq_27_direct",
+        "name": "STEGO_0",
         "mode": "online"
     },
     "dataset": {
@@ -25,7 +25,7 @@
         "name": "STEGO",
         "arch" : "dino",
         "continuous" : true,
-        "dim" : 384,
+        "dim" : 70,
         "extra_clusters" : 0,
         "bn_momentum" : null,
         "bn_eps" : null,
@@ -35,7 +35,7 @@
             "dino_patch_size": 8,
             "dino_feat_type" : "feat",
             "pretrained_weights" : null,
-            "projection_type" : null,
+            "projection_type" : "nonlinear",
             "dropout" : true
         }
     },
@@ -46,7 +46,7 @@
         "stabilize" : false,
         "feature_samples" : 11,
         "neg_samples" : 5,
-        "correspondence_weight" : 0.0,
+        "correspondence_weight" : 1.0,
         "corr_loss" : {
             "neg_inter_weight": 0.63,
             "pos_inter_weight": 0.25,
@@ -57,7 +57,8 @@
         },
         "vectorquantize_weight" : 0.0,
         "vq_loss" : {
-            "e_weight" : 0.25
+            "e_weight" : 0.25,
+            "is_momentum_type": null
         }
     },
 
@@ -92,7 +93,8 @@
         "n_images": 5,
         "is_crf" : true,
         "is_visualize" : false,
-        "is_direct" :  true,
-        "is_diff" : false
+        "is_direct" :  false,
+        "is_diff" : false,
+        "linear_sep" : false
     }
 }

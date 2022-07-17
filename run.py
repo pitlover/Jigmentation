@@ -92,7 +92,8 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
     net_model = net_model.to(device)
     linear_model = linear_model.to(device)
     cluster_model = cluster_model.to(device)
-    vq_model = vq_model.to(device)
+    if opt["loss"].get("vectorquantize_weight", 0) > 0:
+        vq_model = vq_model.to(device)
     criterion = criterion.to(device)
 
     # ----------------------- Distributed ----------------------------#
@@ -117,14 +118,19 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
 
     # ------------------- Optimizer  -----------------------#
     if is_train:
+        if opt["loss"].get("vectorquantize_weight", 0) > 0:
+            vq_params = vq_model.parameters()
+        else:
+            vq_params = None
         net_optimizer, linear_probe_optimizer, cluster_probe_optimizer, vq_probe_optimizer = build_optimizer(
             main_params=model_m.parameters(),
             linear_params=linear_model.parameters(),
             cluster_params=cluster_model.parameters(),
-            vq_params=vq_model.parameters(),
+            vq_params=vq_params,
             momentum_type=opt["loss"]["vq_loss"]["is_momentum_type"],
             opt=opt["optimizer"],
             model_type=opt["wandb"]["name"])
+
     else:
         net_optimizer, linear_probe_optimizer, cluster_probe_optimizer, vq_probe_optimizer = None, None, None, None
 
@@ -401,7 +407,10 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
     net_model.load_state_dict(best_checkpoint['net_model_state_dict'], strict=True)
     linear_model.load_state_dict(best_checkpoint['linear_model_state_dict'], strict=True)
     cluster_model.load_state_dict(best_checkpoint['cluster_model_state_dict'], strict=True)
-    vq_model.load_state_dict(best_checkpoint['vq_model_state_dict'], strict=True)
+    if opt["loss"].get("vectorquantize_weight", 0) > 0:
+        vq_model.load_state_dict(best_checkpoint['vq_model_state_dict'], strict=True)
+    else:
+        vq_model = nn.Identity
     best_loss, best_metrics = evaluate(
         net_model, vq_model, linear_model, cluster_model, val_loader, device=device, opt=opt["eval"],
         n_classes=train_dataset.n_classes, is_crf=opt["eval"]["is_crf"])
@@ -420,7 +429,10 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
     net_model.load_state_dict(latest_checkpoint['net_model_state_dict'], strict=True)
     linear_model.load_state_dict(latest_checkpoint['linear_model_state_dict'], strict=True)
     cluster_model.load_state_dict(latest_checkpoint['cluster_model_state_dict'], strict=True)
-    vq_model.load_state_dict(best_checkpoint['vq_model_state_dict'], strict=True)
+    if opt["loss"].get("vectorquantize_weight", 0) > 0:
+        vq_model.load_state_dict(best_checkpoint['vq_model_state_dict'], strict=True)
+    else:
+        vq_model = nn.Identity
     best_loss, best_metrics = evaluate(
         net_model, vq_model, linear_model, cluster_model, val_loader, device=device, opt=opt["eval"],
         n_classes=train_dataset.n_classes)
@@ -469,30 +481,23 @@ def evaluate(net_model: nn.Module,
             label: torch.Tensor = data['label'].to(device, non_blocking=True)
             img_path: str = data['img_path']
 
-            feats, head_code = net_model(img)
-
+            feats, code = net_model(img)
             # vector quantization version
             if vq_model != nn.Identity:
                 vq_model.eval()
-                vq_output = vq_model(head_code, is_diff=opt["is_diff"])
+                vq_output = vq_model(code, is_diff=opt["is_diff"])
                 code = vq_output[1]
 
             code = F.interpolate(code, label.shape[-2:], mode='bilinear', align_corners=False)
-            head_code = F.interpolate(head_code, label.shape[-2:], mode='bilinear', align_corners=False)
 
             if is_crf:
-                if opt["linear_sep"]:
-                    linear_preds = torch.log_softmax(linear_model(head_code), dim=1)
-                else:
-                    linear_preds = torch.log_softmax(linear_model(code), dim=1)
+                linear_preds = torch.log_softmax(linear_model(code), dim=1)
                 cluster_loss, cluster_preds = cluster_model(code, 2, log_probs=True, is_direct=opt["is_direct"])
+
                 linear_preds = batched_crf(img, linear_preds).argmax(1).cuda()
                 cluster_preds = batched_crf(img, cluster_preds).argmax(1).cuda()
             else:
-                if opt["linear_sep"]:
-                    linear_preds = linear_model(head_code).argmax(1)
-                else:
-                    linear_preds = linear_model(code).argmax(1)
+                linear_preds = linear_model(code).argmax(1)
                 cluster_loss, cluster_preds = cluster_model(code, None, is_direct=opt["is_direct"])
                 cluster_preds = cluster_preds.argmax(1)
 

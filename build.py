@@ -153,10 +153,12 @@ def build_optimizer(main_params, linear_params, cluster_params, vq_params, momen
         else:
             raise ValueError(f"Unsupported optimizer type {cluster_probe_optimizer_type}.")
 
-        vq_probe_optimizer_type = opt["vq"]["name"].lower()
-        if momentum_type is not None:
+        if (momentum_type is not None) or (vq_params == None):
             vq_probe_optimizer = None
-        elif vq_probe_optimizer_type == "adam":
+
+            return net_optimizer, linear_probe_optimizer, cluster_probe_optimizer, vq_probe_optimizer
+        vq_probe_optimizer_type = opt["vq"]["name"].lower()
+        if vq_probe_optimizer_type == "adam":
             vq_probe_optimizer = Adam(vq_params, lr=opt["vq"]["lr"])
         else:
             raise ValueError(f"Unsupported optimizer type {cluster_probe_optimizer_type}.")
