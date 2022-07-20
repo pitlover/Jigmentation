@@ -289,16 +289,26 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
                 print_fn(s)
 
                 if is_master:
-                    wandb.log({
-                        "epoch": current_epoch,
-                        "iters": current_iter,
-                        "train_loss": loss_dict['loss'],
-                        "net_lr": optimizer.param_groups[0]['lr'],
-                        "[0]vq_loss": vq_dict["[0]q_loss"],
-                        "[1]vq_loss": vq_dict["[1]q_loss"],
-                        "param_norm": p_norm.item(),
-                        "grad_norm": g_norm.item(),
-                    })
+                    if opt["loss"]["vq_weight"] > 0.0:
+                        wandb.log({
+                            "epoch": current_epoch,
+                            "iters": current_iter,
+                            "train_loss": loss_dict['loss'],
+                            "net_lr": optimizer.param_groups[0]['lr'],
+                            "[0]vq_loss": vq_dict["[0]q_loss"],
+                            "[1]vq_loss": vq_dict["[1]q_loss"],
+                            "param_norm": p_norm.item(),
+                            "grad_norm": g_norm.item(),
+                        })
+                    else:
+                        wandb.log({
+                            "epoch": current_epoch,
+                            "iters": current_iter,
+                            "train_loss": loss_dict['loss'],
+                            "net_lr": optimizer.param_groups[0]['lr'],
+                            "param_norm": p_norm.item(),
+                            "grad_norm": g_norm.item(),
+                        })
 
             # --------------------------- Valid --------------------------------#
             if ((i + 1) % valid_freq == 0) or ((i + 1) == len(train_loader)):
@@ -441,14 +451,14 @@ def evaluate(model: nn.Module,
 
             if is_crf:
                 linear_preds = torch.log_softmax(linear_model(out), dim=1)
-                cluster_loss, cluster_preds = cluster_model(out, 2, log_probs=True, is_direct=opt["is_direct"])
+                cluster_loss, cluster_preds = cluster_model(out, 2, log_probs=True)
 
                 linear_preds = batched_crf(img, linear_preds).argmax(1).cuda()
                 cluster_preds = batched_crf(img, cluster_preds).argmax(1).cuda()
 
             else:
                 linear_preds = linear_model(out).argmax(1)
-                cluster_loss, cluster_preds = cluster_model(out, None, is_direct=opt["is_direct"])
+                cluster_loss, cluster_preds = cluster_model(out, None)
                 cluster_preds = cluster_preds.argmax(1)
 
             linear_metrics.update(linear_preds, label)

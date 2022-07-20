@@ -161,7 +161,7 @@ class VQLoss(nn.Module):
                 avg_p = p.mean(0)
                 avg_entropy = -avg_p * torch.log(avg_p + 1e-8)
                 avg_entropy = torch.sum(avg_entropy, dim=-1)
-                inter_loss = -avg_entropy
+                inter_loss = -avg_entropy       # maximization
                 inter_list.append(inter_loss)
 
                 if self.opt["intra_weight"] > 0.0:
@@ -171,7 +171,7 @@ class VQLoss(nn.Module):
 
                 loss += (self.opt["intra_weight"] * intra_loss + self.opt["inter_weight"] * inter_loss)
 
-            loss += (q_loss + self.opt["e_weight"] * e_loss)
+            loss += (self.opt["q_weight"] * q_loss + self.opt["e_weight"] * e_loss)
 
             vq_dict[f"[{a}]e_loss"] = e_loss
             vq_dict[f"[{a}]q_loss"] = q_loss

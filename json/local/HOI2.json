@@ -5,8 +5,8 @@
     "wandb": {
         "project": "Jigmentation",
         "entity": "00310214aa-",
-        "name": "HOI_0_32",
-        "memo": "HOI_32",
+        "name": "HOI_0_64",
+        "memo": "HOI_64",
         "mode": "online"
     },
     "dataset": {
@@ -39,7 +39,7 @@
             "projection_type": "nonlinear",
             "dropout": true
         },
-        "K": 32,
+        "K": 64,
         "initialize": "normal",
         "temperature": 0.5
     },

@@ -1,8 +1,8 @@
 from typing import List, Tuple, Any, Optional
 import torch
 import torch.nn as nn
+import random
 import torch.nn.functional as F
-from torch import Tensor
 import kornia.augmentation as Kg
 from utils.layer_utils import ClusterLookup
 from model.dino.DinoFeaturizer import DinoFeaturizer
@@ -38,13 +38,14 @@ class HOI(nn.Module):
         self.vq = nn.Parameter(torch.rand(self.K, dim), requires_grad=True)
         self._vq_initialize(self.vq)
 
-        self._vq_initialized_from_batch = [False]
+        self._vq_initialized_from_batch = False
 
         self.vq0_update = torch.zeros(self.K)
+        self.dropout = nn.Dropout(p=0.3)
 
     def _get_temperature(self, cur_iter):
         # TODO get temperature
-        # return max((10000 - cur_iter) / 10000, 0.1)  # 0 -> 1, 900 -> 0.1
+        # return max((1000 - cur_iter) / 1000, 0.1)  # 0 -> 1, 900 -> 0.1
         return self.opt["temperature"]
 
     def _get_gate(self, cur_iter):
@@ -87,15 +88,17 @@ class HOI(nn.Module):
         # flat_inv_std = torch.rsqrt(flat_var + 1e-6)
         # flat = (flat - flat_mean) * flat_inv_std
 
-        # if (not self._vq_initialized_from_batch[stage]) and (stage == 0):
-        #     with torch.no_grad():
-        #         random_select = list(range(b * h * w))
-        #         random.shuffle(random_select)
-        #         selected_indices = random_select[:k]
-        #         codebook.data.copy_(flat[selected_indices])
-        #     self._vq_initialized_from_batch[stage] = True
+        if not self._vq_initialized_from_batch:
+            with torch.no_grad():
+                random_select = list(range(b * h * w))
+                random.shuffle(random_select)
+                selected_indices = random_select[:k]
+                codebook.data.copy_(flat[selected_indices])
+            self._vq_initialized_from_batch = True
 
         code = codebook  # (K, c)
+
+        code = self.dropout(code)
         # code = F.normalize(codebook, dim=1)
 
         # distance = flat.unsqueeze(1) - code.unsqueeze(0)  # (bhw, 1, c) - (1, K, c) = (bhw, K, c)
@@ -128,9 +131,10 @@ class HOI(nn.Module):
         Augmentation = nn.Sequential(
             Kg.RandomResizedCrop(size=(x.shape[-2], x.shape[-1])),
             Kg.RandomHorizontalFlip(p=0.5),
+            # transforms.ColorJitter(brightness=.4, contrast=.4, saturation=.4, hue=.8),
             Kg.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.1, p=0.8),
             Kg.RandomGrayscale(p=0.2),
-            # TODO add gaussianblur?
+            # TODO add gaussian blur?
             # Kg.RandomGaussianBlur((int(0.1 * x.shape[1]), int(0.1 * x.shape[2])), (0.1, 2.0), p=0.5)
         )
 
