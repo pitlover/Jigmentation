@@ -1,5 +1,4 @@
-import random
-from typing import List, Tuple, Any
+from typing import List, Tuple, Any, Optional
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -125,33 +124,39 @@ class HOI(nn.Module):
 
         return out_feat, assignment, distance
 
-    def _Augmentation(self, x):
+    def _Augmentation(self, x: torch.Tensor):
         Augmentation = nn.Sequential(
-            Kg.RandomResizedCrop(size=(x.shape[1], x.shape[2])),
+            Kg.RandomResizedCrop(size=(x.shape[-2], x.shape[-1])),
             Kg.RandomHorizontalFlip(p=0.5),
             Kg.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.1, p=0.8),
             Kg.RandomGrayscale(p=0.2),
-            Kg.RandomGaussianBlur((int(0.1 * x.shape[1]), int(0.1 * x.shape[2])), (0.1, 2.0), p=0.5))
+            # TODO add gaussianblur?
+            # Kg.RandomGaussianBlur((int(0.1 * x.shape[1]), int(0.1 * x.shape[2])), (0.1, 2.0), p=0.5)
+        )
 
-        return Augmentation
+        return Augmentation(x)
 
-    def forward(self, x: torch.Tensor, cur_iter) -> Tuple[
-        List[torch.Tensor, torch.Tensor], List[torch.Tensor, torch.Tensor], List[torch.Tensor, torch.Tensor], List[
-            torch.Tensor, torch.Tensor]]:
+    def forward(self, x: torch.Tensor, cur_iter):
+        if self.training:
+            I1 = self._Augmentation(x)
+            I2 = self._Augmentation(x)
 
-        I1 = self._Augmentation(x)
-        I2 = self._Augmentation(x)
+            feat1, x1 = self.extractor(I1)  # (32, 384, 28, 28)
+            qx1, assignment1, distance1 = self._vector_quantize(x1, self.vq, cur_iter)  # (32, 384, 28, 28)
 
-        x1 = self.extractor(I1)  # (32, 384, 28, 28)
-        qx1, assignment1, distance1 = self._vector_quantize(x1, self.vq, cur_iter)  # (32, 384, 28, 28)
+            feat2, x2 = self.extractor(I2)  # (32, 384, 28, 28)
+            qx2, assignment2, distance2 = self._vector_quantize(x2, self.vq, cur_iter)  # (32, 384, 28, 28)
 
-        x2 = self.extractor(I2)  # (32, 384, 28, 28)
-        qx2, assignment2, distance2 = self._vector_quantize(x2, self.vq, cur_iter)  # (32, 384, 28, 28)
+            if self.training and (cur_iter % 25 == 0):
+                print("vq", torch.topk(self.vq0_update, 20).values,
+                      torch.topk(self.vq0_update, 20, largest=False).values)
 
-        if self.training and (cur_iter % 25 == 0):
-            print("vq", torch.topk(self.vq0_update, 20).values, torch.topk(self.vq0_update, 20, largest=False).values)
+            return [x1, x2], [qx1, qx2], [assignment1, assignment2], [distance1, distance2]
+        else:
+            feat, x = self.extractor(x)
+            qx, assignment, distance = self._vector_quantize(x, self.vq, cur_iter)
 
-        return [x1, x2], [qx1, qx2], [assignment1, assignment2], [distance1, distance2]
+            return x, qx, assignment, distance
 
     @classmethod
     def build(cls, opt, n_classes):

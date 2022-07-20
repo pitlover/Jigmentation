@@ -79,6 +79,7 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
                                                      is_direct=opt["eval"]["is_direct"])  # CPU model
 
     criterion = build_criterion(n_classes=val_dataset.n_classes,
+                                batch_size=opt["dataloader"]["batch_size"],
                                 opt=opt["loss"])  # CPU criterion
 
     device = torch.device("cuda", local_rank)  # "cuda:0" for single GPU
@@ -221,7 +222,22 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
             model_input = (img, label)
             model_output = model(img, current_iter)  # feats : (b, 384, 28, 28) codes : (b, 70, 28, 28)
 
-            loss, loss_dict = criterion(model_input=model_input, model_output=model_output)
+            output_type = opt["eval"]["output"].lower()
+
+            if output_type == "vq":
+                out = F.interpolate(model_output[1][0], label.shape[-2:], mode='bilinear', align_corners=False)
+            elif output_type == "head":
+                out = F.interpolate(model_output[0][0], label.shape[-2:], mode='bilinear', align_corners=False)
+            else:
+                raise ValueError(f"Unsupported loss type {output_type}")
+
+            detached_code = torch.clone(out)
+            linear_output = linear_model(detached_code)
+            cluster_output = cluster_model(detached_code, None)
+            loss, loss_dict, vq_dict = criterion(model_input=model_input,
+                                        model_output=model_output,
+                                        linear_output=linear_output,
+                                        cluster_output=cluster_output)
 
             forward_time = timer.update()
 
@@ -262,6 +278,9 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
                     for loss_k, loss_v in loss_dict.items():
                         if loss_k != "loss":
                             s += f"-- {loss_k}(now): {loss_v:.6f}\n"
+                            if loss_k == "vq":
+                                for k, v in vq_dict.items():
+                                    s += f"  -- {k}(now): {v:.6f}\n"
                 s += f"time(data/fwd/bwd): {data_time:.3f}/{forward_time:.3f}/{backward_time:.3f}\n"
                 s += f"LR: {lrs}\n"
                 s += f"batch_size x world_size x num_accum: " \
@@ -275,10 +294,8 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
                         "iters": current_iter,
                         "train_loss": loss_dict['loss'],
                         "net_lr": optimizer.param_groups[0]['lr'],
-                        "[0]vq_loss": loss_dict["[0]q_loss"],
-                        "[1]vq_loss": loss_dict["[1]q_loss"],
-                        # # "[2]vq_loss": loss_dict["[2]q_loss"],
-                        # "[3]vq_loss": loss_dict["[3]q_loss"],
+                        "[0]vq_loss": vq_dict["[0]q_loss"],
+                        "[1]vq_loss": vq_dict["[1]q_loss"],
                         "param_norm": p_norm.item(),
                         "grad_norm": g_norm.item(),
                     })
@@ -396,6 +413,7 @@ def evaluate(model: nn.Module,
     # opt = opt["eval"]
 
     model.eval()
+    output_type = opt["output"].lower()
 
     cluster_metrics = UnsupervisedMetrics(
         "Cluster_", n_classes, opt["extra_clusters"], True)
@@ -414,42 +432,36 @@ def evaluate(model: nn.Module,
 
             code, quantized, assignment, distance = model(img, current_iter)
 
-            qx2 = F.interpolate(quantized[-1], label.shape[-2:], mode='bilinear', align_corners=False)
-            # qx1 = F.interpolate(quantized[-2], label.shape[-2:], mode='bilinear', align_corners=False)
-            # end2end = F.interpolate(assignment[-1], label.shape[-2:], mode='bilinear', align_corners=False)
+            if output_type == "vq":
+                out = F.interpolate(quantized, label.shape[-2:], mode='bilinear', align_corners=False)
+            elif output_type == "head":
+                out = F.interpolate(code, label.shape[-2:], mode='bilinear', align_corners=False)
+            else:
+                raise ValueError(f"Unsupported loss type {output_type}")
 
             if is_crf:
-                # linear_preds1 = torch.log_softmax(linear_model(qx1), dim=1)
-                linear_preds = torch.log_softmax(linear_model(qx2), dim=1)
-                cluster_loss, cluster_preds = cluster_model(qx2, 2, log_probs=True, is_direct=opt["is_direct"])
+                linear_preds = torch.log_softmax(linear_model(out), dim=1)
+                cluster_loss, cluster_preds = cluster_model(out, 2, log_probs=True, is_direct=opt["is_direct"])
 
-                # linear_preds1 = batched_crf(img, linear_preds1).argmax(1).cuda()
                 linear_preds = batched_crf(img, linear_preds).argmax(1).cuda()
                 cluster_preds = batched_crf(img, cluster_preds).argmax(1).cuda()
-                # end2end_preds = batched_crf(img, end2end).argmax(1).cuda()
-            else:
-                # linear_preds1 = linear_model(qx1).argmax(1)
-                linear_preds = linear_model(qx2).argmax(1)
-                cluster_loss, cluster_preds = cluster_model(qx2, None, is_direct=opt["is_direct"])
-                cluster_preds = cluster_preds.argmax(1)
-                # end2end_preds = end2end.argmax(1)
 
-            # linear_metrics1.update(linear_preds1, label)
+            else:
+                linear_preds = linear_model(out).argmax(1)
+                cluster_loss, cluster_preds = cluster_model(out, None, is_direct=opt["is_direct"])
+                cluster_preds = cluster_preds.argmax(1)
+
             linear_metrics.update(linear_preds, label)
             cluster_metrics.update(cluster_preds, label)
-            # end2end_metrics.update(end2end_preds, label)
             eval_stats.append(cluster_loss)
 
             if opt["is_visualize"]:
                 saved_data["img_path"].append("".join(img_path))
                 saved_data["cluster_preds"].append(cluster_preds.cpu().squeeze(0))
                 saved_data["linear_preds1"].append(linear_preds.cpu().squeeze(0))
-                # saved_data["linear_preds2"].append(linear_preds2.cpu().squeeze(0))
-                # saved_data["end2end_preds"].append(end2end_preds.cpu().squeeze(0))
                 saved_data["label"].append(label.cpu().squeeze(0))
 
         eval_metrics = get_metrics(cluster_metrics, linear_metrics)
-        # eval_metrics = get_metrics(cluster_metrics, linear_metrics, end2end_metrics)
 
         if opt["is_visualize"]:
             visualization(saved_dir, data_type, saved_data, cluster_metrics)

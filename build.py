@@ -36,7 +36,7 @@ def build_model(opt: dict, n_classes: int = 27, is_direct: bool = False):
 
     elif "hoi" in model_type:
         model = HOI.build(
-            opt = opt,
+            opt=opt,
             n_classes=n_classes
         )
 
@@ -60,15 +60,17 @@ def build_model(opt: dict, n_classes: int = 27, is_direct: bool = False):
             if isinstance(module, (nn.BatchNorm1d, nn.BatchNorm2d, nn.SyncBatchNorm)):
                 module.eps = bn_eps
 
-    if model_type in ["dino", "dulli"]:
+    if model_type in ["dino", "dulli", "hoi"]:
         return model, model.cluster_probe, model.linear_probe
 
 
-def build_criterion(n_classes: int, opt: dict):
+def build_criterion(n_classes: int, batch_size: int, opt: dict):
     # opt = opt["loss"]
     loss_name = opt["name"].lower()
     if "dulli" in loss_name:
         loss = DulliLoss(cfg=opt)
+    elif "hoi" in loss_name:
+        loss = HoiLoss(n_classes=n_classes, batch_size=batch_size, cfg=opt)
     else:
         raise ValueError(f"Unsupported loss type {loss_name}")
 
@@ -112,7 +114,7 @@ def build_optimizer(main_params, cluster_params, linear_params, opt: dict, model
     # opt = opt["optimizer"]
     model_type = model_type.lower()
 
-    if "dulli" in model_type:
+    if "dulli" in model_type or "hoi" in model_type:
         net_optimizer_type = opt["net"]["name"].lower()
         if net_optimizer_type == "adam":
             net_optimizer = Adam(main_params, lr=opt["net"]["lr"])
@@ -127,7 +129,8 @@ def build_optimizer(main_params, cluster_params, linear_params, opt: dict, model
         if cluster_optimizer_type == "adam":
             cluster_optimizer = Adam(cluster_params, lr=opt["cluster"]["lr"])
         elif cluster_optimizer_type == "adamw":
-            cluster_optimizer = AdamW(cluster_params, lr=opt["cluster"]["lr"], weight_decay=opt["cluster"]["weight_decay"])
+            cluster_optimizer = AdamW(cluster_params, lr=opt["cluster"]["lr"],
+                                      weight_decay=opt["cluster"]["weight_decay"])
         else:
             raise ValueError(f"Unsupported optimizer type {cluster_optimizer_type}.")
 

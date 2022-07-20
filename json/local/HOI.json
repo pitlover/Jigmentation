@@ -5,8 +5,8 @@
     "wandb": {
         "project": "Jigmentation",
         "entity": "00310214aa-",
-        "name": "HOI_0",
-        "memo": "HOI",
+        "name": "HOI_0_head",
+        "memo": "HOI_head",
         "mode": "online"
     },
     "dataset": {
@@ -19,7 +19,7 @@
         "num_neighbors": 7
     },
     "dataloader": {
-        "batch_size": 32,
+        "batch_size": 24,
         "num_workers": 8
     },
     "model": {
@@ -39,22 +39,24 @@
             "projection_type": "nonlinear",
             "dropout": true
         },
-        "K" : 1024,
+        "K": 1024,
         "initialize": "normal",
-        "temperature" : 0.2
+        "temperature": 0.2
     },
     "loss": {
-        "name": "DULLI",
-        "e_weight": 0.25,
-        "max_decay_momentum": 0.99,
-        "min_decay_momentum": 0.01,
-        "is_momentum_type": null,
-        "steps": 0,
-        "intra_weight": 1.0,
-        "inter_weight": 1.0,
+        "name": "HOI",
         "is_weight_sum": true,
-        "topK_weight_sum": 0
-
+        "vq_weight": 1.0,
+        "vq_loss": {
+            "e_weight": 0.25,
+            "manage_weight": 0.0,
+            "intra_weight": 1.0,
+            "inter_weight": 1.0
+        },
+        "cross_weight": 1.0,
+        "cross_loss" : {
+            "temperature" : 0.5
+        }
     },
     "optimizer": {
         "net": {
@@ -76,7 +78,7 @@
     "train": {
         "print_freq": 25,
         "valid_freq": 100,
-        "epoch": 2,
+        "epoch": 4,
         "freeze_encoder_bn": false,
         "freeze_all_bn": -1,
         "num_accum": 1,
@@ -89,6 +91,7 @@
         "is_visualize": false,
         "is_direct": false,
         "is_diff": false,
-        "linear_sep" : false
+        "linear_sep": false,
+        "output" : "head"
     }
 }
