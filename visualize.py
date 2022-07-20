@@ -26,6 +26,7 @@ def visualization(save_dir: str, dataset_type: str, saved_data: defaultdict, clu
         os.makedirs(join(save_dir, "label"), exist_ok=True)
     os.makedirs(join(save_dir, "cluster"), exist_ok=True)
     os.makedirs(join(save_dir, "linear"), exist_ok=True)
+    os.makedirs(join(save_dir, "end2end"), exist_ok=True)
 
     if dataset_type.startswith("cityscapes"):
         label_cmap = create_cityscapes_colormap()

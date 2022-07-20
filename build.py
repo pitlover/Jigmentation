@@ -1,5 +1,5 @@
 from typing import Optional, Dict
-from torch.optim import Adam, AdamW
+from torch.optim import Adam, AdamW, SGD
 import torch.distributed as dist
 from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data.dataloader import DataLoader
@@ -9,12 +9,17 @@ from model.dino.DinoFeaturizer import DinoFeaturizer
 from dataset.data import ContrastiveSegDataset, get_transform
 from torchvision import transforms as T
 from loss import *
+from utils.layer_utils import ClusterLookup
+from model.DULLI import DULLI
+from model.HOI import HOI
+from torch.optim.lr_scheduler import CosineAnnealingLR
 
 
 def build_model(opt: dict, n_classes: int = 27, is_direct: bool = False):
     # opt = opt["model"]
     model_type = opt["name"].lower()
 
+    cluster_model = ClusterLookup(n_classes, n_classes + opt["extra_clusters"])
     if "stego" in model_type:
         model = STEGOmodel.build(
             opt=opt,
@@ -23,43 +28,23 @@ def build_model(opt: dict, n_classes: int = 27, is_direct: bool = False):
         net_model = model.net
         linear_model = model.linear_probe
         cluster_model = model.cluster_probe
-
-        '''
-        net_params_no_grad = 0
-        net_params_grad = 0
-        for p in net_model.parameters():
-            if p.requires_grad:
-                net_params_grad += p.numel()
-            else:
-                net_params_no_grad += p.numel()
-
-        linear_params = 0
-        for p in linear_model.parameters():
-            linear_params += p.numel()
-
-        cluster_params = 0
-        for p in cluster_model.parameters():
-            cluster_params += p.numel()
-        
-        '''
-    elif "jirano" in model_type:
-        model = STEGOmodel.build(
+    elif "dulli" in model_type:
+        model = DULLI.build(
             opt=opt,
             n_classes=n_classes
         )
-        net_model = model.net
 
-        if is_direct:
-            linear_model = nn.Identity()
-        else:
-            linear_model = model.linear_probe
-        cluster_model = model.cluster_probe
+    elif "hoi" in model_type:
+        model = HOI.build(
+            opt = opt,
+            n_classes=n_classes
+        )
+
     elif model_type == "dino":
         model = nn.Sequential(
             DinoFeaturizer(20, opt),  # dim doesnt matter
             LambdaLayer(lambda p: p[0])
         )
-
     else:
         raise ValueError("No model: {} found".format(model_type))
 
@@ -75,20 +60,15 @@ def build_model(opt: dict, n_classes: int = 27, is_direct: bool = False):
             if isinstance(module, (nn.BatchNorm1d, nn.BatchNorm2d, nn.SyncBatchNorm)):
                 module.eps = bn_eps
 
-    if "stego" in model_type or "jirano" in model_type:
-        return net_model, linear_model, cluster_model
-    elif model_type == "dino":
-        return model
+    if model_type in ["dino", "dulli"]:
+        return model, model.cluster_probe, model.linear_probe
 
 
 def build_criterion(n_classes: int, opt: dict):
     # opt = opt["loss"]
     loss_name = opt["name"].lower()
-    if "stego" in loss_name:
-        loss = StegoLoss(n_classes=n_classes, cfg=opt, corr_weight=opt["correspondence_weight"])
-    elif "jirano" in loss_name:
-        loss = JiranoLoss(n_classes=n_classes, cfg=opt, corr_weight=opt["correspondence_weight"],
-                          vq_weight=opt["vectorquantize_weight"])
+    if "dulli" in loss_name:
+        loss = DulliLoss(cfg=opt)
     else:
         raise ValueError(f"Unsupported loss type {loss_name}")
 
@@ -128,45 +108,40 @@ def split_params_for_optimizer(model, opt):
     return params_for_optimizer
 
 
-def build_optimizer(main_params, linear_params, cluster_params, vq_params, momentum_type, opt: dict, model_type: str):
+def build_optimizer(main_params, cluster_params, linear_params, opt: dict, model_type: str):
     # opt = opt["optimizer"]
     model_type = model_type.lower()
 
-    if "stego" in model_type or "jirano" in model_type:
+    if "dulli" in model_type:
         net_optimizer_type = opt["net"]["name"].lower()
         if net_optimizer_type == "adam":
             net_optimizer = Adam(main_params, lr=opt["net"]["lr"])
         elif net_optimizer_type == "adamw":
             net_optimizer = AdamW(main_params, lr=opt["net"]["lr"], weight_decay=opt["net"]["weight_decay"])
+        elif net_optimizer_type == "sgd":
+            net_optimizer = SGD(main_params, lr=opt["net"]["lr"], momentum=0.9, weight_decay=opt["net"]["weight_decay"])
         else:
             raise ValueError(f"Unsupported optimizer type {net_optimizer_type}.")
 
-        linear_probe_optimizer_type = opt["linear"]["name"].lower()
-        if linear_probe_optimizer_type == "adam":
-            linear_probe_optimizer = Adam(linear_params, lr=opt["linear"]["lr"])
+        cluster_optimizer_type = opt["cluster"]["name"].lower()
+        if cluster_optimizer_type == "adam":
+            cluster_optimizer = Adam(cluster_params, lr=opt["cluster"]["lr"])
+        elif cluster_optimizer_type == "adamw":
+            cluster_optimizer = AdamW(cluster_params, lr=opt["cluster"]["lr"], weight_decay=opt["cluster"]["weight_decay"])
         else:
-            raise ValueError(f"Unsupported optimizer type {linear_probe_optimizer_type}.")
+            raise ValueError(f"Unsupported optimizer type {cluster_optimizer_type}.")
 
-        cluster_probe_optimizer_type = opt["cluster"]["name"].lower()
-        if cluster_probe_optimizer_type == "adam":
-            cluster_probe_optimizer = Adam(cluster_params, lr=opt["cluster"]["lr"])
+        linear_optimizer_type = opt["cluster"]["name"].lower()
+        if linear_optimizer_type == "adam":
+            linear_optimizer = Adam(linear_params, lr=opt["linear"]["lr"])
+        elif linear_optimizer_type == "adamw":
+            linear_optimizer = AdamW(linear_params, lr=opt["linear"]["lr"], weight_decay=opt["linear"]["weight_decay"])
         else:
-            raise ValueError(f"Unsupported optimizer type {cluster_probe_optimizer_type}.")
-
-        if (momentum_type is not None) or (vq_params == None):
-            vq_probe_optimizer = None
-
-            return net_optimizer, linear_probe_optimizer, cluster_probe_optimizer, vq_probe_optimizer
-        vq_probe_optimizer_type = opt["vq"]["name"].lower()
-        if vq_probe_optimizer_type == "adam":
-            vq_probe_optimizer = Adam(vq_params, lr=opt["vq"]["lr"])
-        else:
-            raise ValueError(f"Unsupported optimizer type {cluster_probe_optimizer_type}.")
-
-        return net_optimizer, linear_probe_optimizer, cluster_probe_optimizer, vq_probe_optimizer
-
+            raise ValueError(f"Unsupported optimizer type {linear_optimizer_type}.")
     else:
         raise ValueError("No model: {} found".format(model_type))
+
+    return net_optimizer, cluster_optimizer, linear_optimizer
 
 
 def build_scheduler(opt: dict, optimizer, loader, start_epoch):
@@ -190,6 +165,8 @@ def build_scheduler(opt: dict, optimizer, loader, start_epoch):
             div_factor=opt["scheduler"]['div_factor'],
             final_div_factor=opt["scheduler"]['final_div_factor']
         )
+    elif scheduler_type == "cos":
+        scheduler = CosineAnnealingLR(optimizer, T_max=len(loader), eta_min=0, last_epoch=-1)
     else:
         raise ValueError(f"Unsupported scheduler type {scheduler_type}.")
 
@@ -220,12 +197,10 @@ def build_dataset(opt: dict, mode: str = "train", model_type: str = "dino") -> C
             transform=get_transform(opt["res"], False, opt["loader_crop_type"]),
             target_transform=get_transform(opt["res"], True, opt["loader_crop_type"]),
             cfg=opt,
-            aug_geometric_transform=geometric_transforms,
-            aug_photometric_transform=photometric_transforms,
             num_neighbors=opt["num_neighbors"],
             mask=True,
-            pos_images=True,
-            pos_labels=True
+            pos_images=False,
+            pos_labels=False
         )
     elif mode == "val" or mode == "test":
         if mode == "test":

@@ -5,8 +5,8 @@
     "wandb": {
         "project": "Jigmentation",
         "entity": "00310214aa-",
-        "name": "JIRANO_1024_weightsum_uni_sed0",
-        "memo": "weightsum, vq_initail_uni_seed0",
+        "name": "HOI_0",
+        "memo": "HOI",
         "mode": "online"
     },
     "dataset": {
@@ -23,7 +23,7 @@
         "num_workers": 8
     },
     "model": {
-        "name": "JIRANO",
+        "name": "HOI",
         "arch": "dino",
         "continuous": true,
         "dim": 70,
@@ -38,55 +38,35 @@
             "pretrained_weights": null,
             "projection_type": "nonlinear",
             "dropout": true
-        }
+        },
+        "K" : 1024,
+        "initialize": "normal",
+        "temperature" : 0.2
     },
     "loss": {
-        "name": "jirano",
-        "zero_clamp": true,
-        "pointwise": true,
-        "stabilize": false,
-        "feature_samples": 11,
-        "neg_samples": 5,
-        "correspondence_weight": 1.0,
-        "corr_loss": {
-            "neg_inter_weight": 0.63,
-            "pos_inter_weight": 0.25,
-            "pos_intra_weight": 0.67,
-            "neg_inter_shift": 0.66,
-            "pos_inter_shift": 0.02,
-            "pos_intra_shift": 0.08
-        },
-        "vectorquantize_weight": 1.0,
-        "vq_loss": {
-            "e_weight": 0.25,
-            "K": 1024,
-            "max_decay_momentum": 0.99,
-            "min_decay_momentum": 0.01,
-            "is_momentum_type": null,
-            "steps": 0,
-            "manage_weight": 0.0,
-            "intra_weight": 0.0,
-            "inter_weight": 0.0,
-            "is_weight_sum": true,
-            "topK_weight_sum": 0,
-            "initialize": "normal"
-        }
+        "name": "DULLI",
+        "e_weight": 0.25,
+        "max_decay_momentum": 0.99,
+        "min_decay_momentum": 0.01,
+        "is_momentum_type": null,
+        "steps": 0,
+        "intra_weight": 1.0,
+        "inter_weight": 1.0,
+        "is_weight_sum": true,
+        "topK_weight_sum": 0
+
     },
     "optimizer": {
         "net": {
-            "name": "adamw",
+            "name": "sgd",
             "lr": 5e-4,
             "weight_decay": 2.0
-        },
-        "linear": {
-            "name": "adam",
-            "lr": 5e-3
         },
         "cluster": {
             "name": "adam",
             "lr": 5e-3
         },
-        "vq": {
+        "linear": {
             "name": "adam",
             "lr": 5e-3
         }

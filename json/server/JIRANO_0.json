@@ -5,8 +5,8 @@
     "wandb": {
         "project": "Jigmentation",
         "entity": "00310214aa-",
-        "name": "JIRANO_corrX_1024weightsum_e1",
-        "memo": "384_1024_weightsum_corrX",
+        "name": "JIRANO_0_1024_weightsum_uni_sed0",
+        "memo": "weightsum, vq_initail_uni_seed0",
         "mode": "online"
     },
     "dataset": {
@@ -47,7 +47,7 @@
         "stabilize": false,
         "feature_samples": 11,
         "neg_samples": 5,
-        "correspondence_weight": 0.0,
+        "correspondence_weight": 1.0,
         "corr_loss": {
             "neg_inter_weight": 0.63,
             "pos_inter_weight": 0.25,
@@ -58,17 +58,18 @@
         },
         "vectorquantize_weight": 1.0,
         "vq_loss": {
-            "e_weight": 1.0,
+            "e_weight": 0.25,
             "K": 1024,
             "max_decay_momentum": 0.99,
             "min_decay_momentum": 0.01,
             "is_momentum_type": null,
-            "steps" : 0,
-            "manage_weight" : 0.0,
-            "intra_weight" : 0.25,
-            "inter_weight" : 0.75,
-            "is_weight_sum" : true,
-            "topK_weight_sum": 0
+            "steps": 0,
+            "manage_weight": 0.0,
+            "intra_weight": 0.0,
+            "inter_weight": 0.0,
+            "is_weight_sum": true,
+            "topK_weight_sum": 0,
+            "initialize": "uni"
         }
     },
     "optimizer": {
@@ -107,7 +108,7 @@
         "is_crf": true,
         "is_visualize": false,
         "is_direct": false,
-        "is_diff" : false,
+        "is_diff": false,
         "linear_sep" : false
     }
 }

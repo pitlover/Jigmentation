@@ -23,163 +23,58 @@ def super_perm(size: int, device: torch.device):
     return perm % size
 
 
-class JiranoLoss(nn.Module):
-
+# TODO Dulli Loss
+class DulliLoss(nn.Module):
     def __init__(self,
-                 n_classes: int,
-                 cfg: dict,
-                 corr_weight: float = 0.0,
-                 vq_weight: float = 0.0):
+                 cfg: dict
+                 ):
         super().__init__()
+        self.opt = cfg
 
-        self.n_classes = n_classes
-        self.corr_weight = corr_weight
-        self.corr_loss = ContrastiveCorrelationLoss(cfg)
-        self.linear_loss = LinearLoss(cfg)
-        self.vq_weight = vq_weight
+    def forward(self, model_input, model_output: Tuple):
+        head, quantized, assignment, distance = model_output  # (x0, x1, x2, x3), (vq0, vq1, vq2, vq3)
+        loss_dict = {}
+        q_list, e_list, inter_list, loss = [], [], [], 0
 
-    def forward(self, model_input, model_output, model_pos_output=None,
-                vq_output: torch.Tensor() = None,
-                linear_output: torch.Tensor() = None,
-                cluster_output: torch.Tensor() = None) \
-            -> Tuple[torch.Tensor, Dict[str, float], Dict[str, float], Dict[str, float]]:
-        img, label = model_input
-        feats, code = model_output
+        for a in range(len(head)):
+            # ch = head[a].shape[1]
+            q_loss = F.mse_loss(head[a].detach(), quantized[a])
+            e_loss = F.mse_loss(quantized[a], head[a].detach())
+            q_list.append(q_loss)
+            e_list.append(e_loss)
 
-        if self.corr_weight > 0:
-            feats_pos, code_pos = model_pos_output
-            corr_loss, corr_loss_dict = self.corr_loss(feats, feats_pos, code, code_pos)
-        else:
-            corr_loss_dict = {"none": 0}
-            corr_loss = torch.tensor(0, dtype=torch.float32, device=feats.device)
+            # manageloss
+            p = F.softmax(distance[a], dim=1)
+            entropy = -p * torch.log(p + 1e-8)
+            entropy = torch.sum(entropy, dim=-1)  # (25088,)
+            intra_loss = entropy.mean()  # minimization
 
-        linear_loss = self.linear_loss(linear_output, label, self.n_classes)
-        cluster_loss = cluster_output[0]
-        vq_loss = vq_output[0]
-        loss = (corr_loss * self.corr_weight) + (vq_loss * self.vq_weight) + linear_loss + cluster_loss
-        loss_dict = {"loss": loss.item(),
-                     "corr": corr_loss.item(),
-                     "vq": vq_loss.item(),
-                     "linear": linear_loss.item(),
-                     "cluster": cluster_loss.item()}
+            avg_p = p.mean(0)
+            avg_entropy = -avg_p * torch.log(avg_p + 1e-8)
+            avg_entropy = torch.sum(avg_entropy, dim=-1)
+            inter_loss = -avg_entropy
+            inter_list.append(inter_loss)
 
-        return loss, loss_dict, corr_loss_dict, vq_output[2]
+            # TODO need to fix
+            # if a == 1:
+            #     sub_loss = ( (q_loss + self.opt["e_weight"] * e_loss) + self.opt["inter_weight"] * inter_loss)
+            #     loss += sub_loss
+            # else:
+            #     sub_loss = (q_loss + self.opt["e_weight"] * e_loss + self.opt["inter_weight"] * inter_loss)
+            #     loss += sub_loss
+            # loss += (q_loss + self.opt["e_weight"] * e_loss + self.opt["intra_weight"] * intra_loss + self.opt["inter_weight"] * inter_loss)
+            # loss += (q_loss + self.opt["e_weight"] * e_loss + self.opt["inter_weight"] * inter_loss)  # SWaV style
+            # loss += (q_loss + self.opt["e_weight"] * e_loss + self.opt["intra_weight"] * intra_loss)  # my intuition
+            loss += (q_loss + self.opt["e_weight"] * e_loss)
 
+            loss_dict[f"[{a}]e_loss"] = e_loss
+            loss_dict[f"[{a}]q_loss"] = q_loss
+            loss_dict[f"[{a}]inter_loss"] = inter_loss
+            # loss_dict[f"[{a}]total_loss"] = sub_loss
 
-class StegoLoss(nn.Module):
+        loss_dict.update({"e_vq": sum(e_list), "q_vq": sum(q_list), "inter": sum(inter_list), "loss": loss})
 
-    def __init__(self,
-                 n_classes: int,
-                 cfg: dict,
-                 corr_weight: float = 1.0):
-        super().__init__()
-
-        self.n_classes = n_classes
-        self.corr_weight = corr_weight
-        self.corr_loss = ContrastiveCorrelationLoss(cfg)
-        self.linear_loss = LinearLoss(cfg)
-
-    def forward(self, model_input, model_output, model_pos_output=None, linear_output: torch.Tensor() = None,
-                cluster_output: torch.Tensor() = None) \
-            -> Tuple[torch.Tensor, Dict[str, float]]:
-        img, label = model_input
-        feats, code = model_output
-
-        if self.corr_weight > 0:
-            feats_pos, code_pos = model_pos_output
-            corr_loss, corr_loss_dict = self.corr_loss(feats, feats_pos, code, code_pos)
-        else:
-            corr_loss_dict = {"none": 0}
-            corr_loss = torch.tensor(0, dtype=torch.float32, device=feats.device)
-
-        linear_loss = self.linear_loss(linear_output, label, self.n_classes)
-        cluster_loss = cluster_output[0]
-        loss = (corr_loss * self.corr_weight) + linear_loss + cluster_loss
-        loss_dict = {"loss": loss.item(), "corr": corr_loss.item(), "linear": linear_loss.item(),
-                     "cluster": cluster_loss.item()}
-
-        return loss, loss_dict, corr_loss_dict
-
-
-class ContrastiveCorrelationLoss(nn.Module):
-
-    def __init__(self, cfg: dict):
-        super().__init__()
-        self.cfg = cfg
-
-    def standard_scale(self, t):
-        t1 = t - t.mean()
-        t2 = t1 / t1.std()
-        return t2
-
-    def helper(self, f1, f2, c1, c2, shift):
-        with torch.no_grad():
-            # Comes straight from backbone which is currently frozen. this saves mem.
-            fd = tensor_correlation(norm(f1), norm(f2))
-
-            if self.cfg["pointwise"]:
-                old_mean = fd.mean()
-                fd -= fd.mean([3, 4], keepdim=True)
-                fd = fd - fd.mean() + old_mean
-
-        cd = tensor_correlation(norm(c1), norm(c2))
-
-        if self.cfg["zero_clamp"]:
-            min_val = 0.0
-        else:
-            min_val = -9999.0
-
-        if self.cfg["stabilize"]:
-            loss = - cd.clamp(min_val, .8) * (fd - shift)
-        else:
-            loss = - cd.clamp(min_val) * (fd - shift)
-
-        return loss, cd
-
-    def forward(self,
-                orig_feats: torch.Tensor,
-                orig_feats_pos: torch.Tensor,
-                orig_code: torch.Tensor,
-                orig_code_pos: torch.Tensor,
-                ):
-
-        coord_shape = [orig_feats.shape[0], self.cfg["feature_samples"], self.cfg["feature_samples"], 2]
-
-        coords1 = torch.rand(coord_shape, device=orig_feats.device) * 2 - 1
-        coords2 = torch.rand(coord_shape, device=orig_feats.device) * 2 - 1
-
-        feats = sample(orig_feats, coords1)
-        code = sample(orig_code, coords1)
-
-        feats_pos = sample(orig_feats_pos, coords2)
-        code_pos = sample(orig_code_pos, coords2)
-
-        pos_intra_loss, pos_intra_cd = self.helper(
-            feats, feats, code, code, self.cfg["corr_loss"]["pos_intra_shift"])
-        pos_inter_loss, pos_inter_cd = self.helper(
-            feats, feats_pos, code, code_pos, self.cfg["corr_loss"]["pos_inter_shift"])
-
-        neg_losses = []
-        neg_cds = []
-        for i in range(self.cfg["neg_samples"]):
-            perm_neg = super_perm(orig_feats.shape[0], orig_feats.device)
-            feats_neg = sample(orig_feats[perm_neg], coords2)
-            code_neg = sample(orig_code[perm_neg], coords2)
-            neg_inter_loss, neg_inter_cd = self.helper(
-                feats, feats_neg, code, code_neg, self.cfg["corr_loss"]["neg_inter_shift"])
-            neg_losses.append(neg_inter_loss)
-            neg_cds.append(neg_inter_cd)
-
-        neg_inter_loss = torch.cat(neg_losses, axis=0)
-        neg_inter_cd = torch.cat(neg_cds, axis=0)
-
-        return (self.cfg["corr_loss"]["pos_intra_weight"] * pos_intra_loss.mean() +
-                self.cfg["corr_loss"]["pos_inter_weight"] * pos_inter_loss.mean() +
-                self.cfg["corr_loss"]["neg_inter_weight"] * neg_inter_loss.mean(),
-                {"self_loss": pos_intra_loss.mean().item(),
-                 "knn_loss": pos_inter_loss.mean().item(),
-                 "rand_loss": neg_inter_loss.mean().item()}
-                )
+        return loss, loss_dict
 
 
 class LinearLoss(nn.Module):
