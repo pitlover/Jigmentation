@@ -94,6 +94,7 @@ class CrossLoss(nn.Module):
         return mask.cuda()
 
     def forward(self, model_output: Tuple, model_input: Tuple):
+        # -------------------------------------------------------------------------------------------------- #
         # head, quantized, assignment, distance = model_output  # [x1, x2], [qx1, qx2], [ass1, ass2], [dis1, dis2]
         # # head (b, d, h, w)
         # b, d, h, w = head[0].shape
@@ -138,51 +139,113 @@ class CrossLoss(nn.Module):
         #
         # return cross_loss / (2 * self.batch_size)
 
+        # -------------------------------------------------------------------------------------------------- #
+        # head, quantized, assignment, distance = model_output  # [x1, x2], [qx1, qx2], [ass1, ass2], [dis1, dis2]
+        # # head (b, d, h, w)
+        # b, d, h, w = head[0].shape
+        #
+        # x1 = head[0].reshape(self.batch_size * d, -1)  # (bd, hw)
+        # x2 = head[1].reshape(self.batch_size * d, -1)  # (bd, hw)
+        #
+        # z1 = quantized[0].reshape(self.batch_size * d, -1)  # (bd, hw)
+        # z2 = quantized[1].reshape(self.batch_size * d, -1)  # (bd, hw)
+        #
+        # x1z2 = torch.cat([x1, z2], dim=0)  # (2bd, hw)
+        # x2z1 = torch.cat([x2, z1], dim=0)  # (2bd, hw)
+        #
+        # '''
+        # cos | x1z1 | x1z3 | x1z2 | x1z4
+        # --------------------------------
+        # x1z1|  1  |  N  |  P  |  N  |
+        # x1z3|  N  |  1  |  N  |  P  |
+        # x1z2|  P  |  N  |  1  |  N  |
+        # x1z4|  N  |  P  |  N  |  1  |
+        # '''
+        # cos_12 = self.cos(x1z2.unsqueeze(1), x1z2.unsqueeze(0))  # (2bd, 2bd)
+        #
+        # Right_12 = torch.diagonal(cos_12, self.batch_size * d)  # (2bd - b)
+        # Left_12 = torch.diagonal(cos_12, -self.batch_size * d)  # (2bd - b)
+        #
+        # pos_12 = torch.cat([Right_12, Left_12]).view(2 * self.batch_size * d, 1)  # (2bd, 1)
+        # neg_12 = cos_12[self.get_corr_mask].view(2 * self.batch_size * d, -1)  # (2bd, 2(bd-1))
+        #
+        # cos_21 = self.cos(x2z1.unsqueeze(1), x2z1.unsqueeze(0))
+        # Right_21 = torch.diagonal(cos_21, self.batch_size * d)
+        # Left_21 = torch.diagonal(cos_21, -self.batch_size * d)
+        # pos_21 = torch.cat([Right_21, Left_21]).view(2 * self.batch_size * d, 1)
+        # neg_21 = cos_21[self.get_corr_mask].view(2 * self.batch_size * d, -1)
+        #
+        # logits_12 = torch.cat((pos_12, neg_12), dim=-1)
+        # logits_12 /= self.temperature
+        #
+        # logits_21 = torch.cat((pos_21, neg_21), dim=-1)
+        # logits_21 /= self.temperature
+        #
+        # labels = torch.zeros(2 * self.batch_size * d).to(head[0].device).long()
+        # cross_loss = self.ce(logits_12, labels) + self.ce(logits_21, labels)
+        # -------------------------------------------------------------------------------------------------- #
         head, quantized, assignment, distance = model_output  # [x1, x2], [qx1, qx2], [ass1, ass2], [dis1, dis2]
         # head (b, d, h, w)
         b, d, h, w = head[0].shape
 
-        x1 = head[0].reshape(self.batch_size * d, -1)  # (bd, hw)
-        x2 = head[1].reshape(self.batch_size * d, -1)  # (bd, hw)
+        x1 = head[0].permute(2, 3, 0, 1).reshape(h * w, b, d)
+        x2 = head[1].permute(2, 3, 0, 1).reshape(h * w, b, d)
 
-        z1 = quantized[0].reshape(self.batch_size * d, -1)  # (bd, hw)
-        z2 = quantized[1].reshape(self.batch_size * d, -1)  # (bd, hw)
+        z1 = quantized[0].permute(2, 3, 0, 1).reshape(h * w, b, d)
+        z2 = quantized[1].permute(2, 3, 0, 1).reshape(h * w, b, d)
 
-        x1z2 = torch.cat([x1, z2], dim=0)  # (2bd, hw)
-        x2z1 = torch.cat([x2, z1], dim=0)  # (2bd, hw)
+        # for each patch, there is 2b samples, that each are d-dimensional vector.
+        # for i-th sample (0 <= i < 2b),
+        # ... positive sample indices = [0, b] ( # = 2 )
+        # ... negative sample indices = [1, 2, .... b-1, b+1, ... 2b-1] ( # = 2b - 2)
+        x1z2 = torch.cat([x1, z2], dim=1)  # (hw, 2b, d)
+        x2z1 = torch.cat([x2, z1], dim=1)  # (hw, 2b, d)
 
-        '''
-        cos | x1z1 | x1z3 | x1z2 | x1z4
-        --------------------------------
-        x1z1|  1  |  N  |  P  |  N  |
-        x1z3|  N  |  1  |  N  |  P  |
-        x1z2|  P  |  N  |  1  |  N  |
-        x1z4|  N  |  P  |  N  |  1  |
-        '''
-        cos_12 = self.cos(x1z2.unsqueeze(1), x1z2.unsqueeze(0))  # (2bd, 2bd)
+        neutral_mask = torch.eye(2 * b, dtype=x1.dtype, device=x1.device)
+        pos_mask = torch.roll(torch.eye(2 * b, dtype=x1.dtype, device=x1.device), shifts=b, dims=1)
+        neutral_pos_mask = (neutral_mask + pos_mask).bool()  # positives = 2b, neutral = 2b
+        neg_mask = torch.logical_not(neutral_pos_mask)  # negatives = 2b * 2b - 2b - 2b = 2b * 2b - 4b = 2b * (2b - 2)
 
-        Right_12 = torch.diagonal(cos_12, self.batch_size * d)  # (2bd - b)
-        Left_12 = torch.diagonal(cos_12, -self.batch_size * d)  # (2bd - b)
+        total_num_patches = h * w * 2 * b
+        labels = torch.zeros(total_num_patches, dtype=torch.long, device=x1.device)  # (hw2b,)
 
-        pos_12 = torch.cat([Right_12, Left_12]).view(2 * self.batch_size * d, 1)  # (2bd, 1)
-        neg_12 = cos_12[self.get_corr_mask].view(2 * self.batch_size * d, -1)  # (2bd, 2(bd-1))
+        # ---- 1 to 2 ---- #
+        cos_12 = self.cos(x1z2.unsqueeze(2), x1z2.unsqueeze(1))  # (hw, 2b, 1, d) : (hw, 1, 2b, d) = (hw, 2b, 2b)
 
-        cos_21 = self.cos(x2z1.unsqueeze(1), x2z1.unsqueeze(0))
-        Right_21 = torch.diagonal(cos_21, self.batch_size * d)
-        Left_21 = torch.diagonal(cos_21, -self.batch_size * d)
-        pos_21 = torch.cat([Right_21, Left_21]).view(2 * self.batch_size * d, 1)
-        neg_21 = cos_21[self.get_corr_mask].view(2 * self.batch_size * d, -1)
+        # these are not from the same input, but from the same image with different augmentation.
+        # these values should be increased.
+        right_12 = torch.diagonal(cos_12, offset=b, dim1=1, dim2=2)  # (hw, b)
+        left_12 = torch.diagonal(cos_12, offset=-b, dim1=1, dim2=2)  # (hw, b)
+        pos_12 = torch.cat([right_12, left_12], dim=1).unsqueeze(-1)  # (hw, 2b) -> (hw, 2b, 1)
 
-        logits_12 = torch.cat((pos_12, neg_12), dim=-1)
+        # these are not from the same input nor the same image.
+        neg_12 = cos_12[:, neg_mask].reshape(h * w, 2 * b, 2 * b - 2)  # (hw, 2b * (2b - 2)) -> (hw, 2b, 2b-2)
+
+        # by concatenation, the #classes = (2b-1), where the correct label is 0-th.
+        logits_12 = torch.cat([pos_12, neg_12], dim=-1)  # (hw, 2b, 2b - 1)
         logits_12 /= self.temperature
+        loss_12 = self.ce(logits_12.view(total_num_patches, -1), labels)
 
-        logits_21 = torch.cat((pos_21, neg_21), dim=-1)
+        # ---- 2 to 1 ---- #
+        cos_21 = self.cos(x2z1.unsqueeze(2), x2z1.unsqueeze(1))  # (hw, 2b, 1, d) : (hw, 1, 2b, d) = (hw, 2b, 2b)
+
+        # these are not from the same input, but from the same image with different augmentation.
+        # these values should be increased.
+        right_21 = torch.diagonal(cos_21, offset=b, dim1=1, dim2=2)  # (hw, b)
+        left_21 = torch.diagonal(cos_21, offset=-b, dim1=1, dim2=2)  # (hw, b)
+        pos_21 = torch.cat([right_21, left_21], dim=1).unsqueeze(-1)  # (hw, 2b) -> (hw, 2b, 1)
+
+        # these are not from the same input nor the same image.
+        neg_21 = cos_21[:, neg_mask].reshape(h * w, 2 * b, 2 * b - 2)  # (hw, 2b * (2b - 2)) -> (hw, 2b, 2b-2)
+
+        # by concatenation, the #classes = (2b-1), where the correct label is 0-th.
+        logits_21 = torch.cat([pos_21, neg_21], dim=-1)  # (hw, 2b, 2b - 1)
         logits_21 /= self.temperature
+        loss_21 = self.ce(logits_21.view(total_num_patches, -1), labels)
 
-        labels = torch.zeros(2 * self.batch_size * d).to(head[0].device).long()
-        cross_loss = self.ce(logits_12, labels) + self.ce(logits_21, labels)
-
-        return cross_loss / (2 * self.batch_size * d)
+        # --- final ---- #
+        cross_loss = loss_12 + loss_21  # (1,) + (1,) = (1,)
+        return cross_loss / total_num_patches  # average
 
 
 class VQLoss(nn.Module):

@@ -5,8 +5,8 @@
     "wandb": {
         "project": "Jigmentation",
         "entity": "00310214aa-",
-        "name": "HOI_64_patch",
-        "memo": "HOI_64_patch",
+        "name": "HOI_64_patch_vq",
+        "memo": "HOI_64_patch_vq",
         "mode": "online"
     },
     "dataset": {
@@ -19,7 +19,7 @@
         "num_neighbors": 7
     },
     "dataloader": {
-        "batch_size": 4,
+        "batch_size": 32,
         "num_workers": 8
     },
     "model": {
@@ -95,6 +95,6 @@
         "is_direct": false,
         "is_diff": false,
         "linear_sep": false,
-        "output" : "head"
+        "output" : "vq"
     }
 }
