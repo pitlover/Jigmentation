@@ -5,47 +5,60 @@
     "wandb": {
         "project": "Jigmentation",
         "entity": "00310214aa-",
-        "name": "STEGO",
+        "name": "STEGO_reproduced",
+        "memo": "STEGO",
         "mode": "online"
     },
     "dataset": {
         "data_type": "cocostuff27",
         "data_path": "../Datasets/cocostuff",
-        "loader_crop_type" : "center",
-        "crop_type" : "five",
+        "loader_crop_type": "center",
+        "crop_type": "five",
         "crop_ratio": 0.5,
-        "res" : 224,
-        "num_neighbors" : 7
+        "res": 224,
+        "num_neighbors": 7
     },
     "dataloader": {
-        "batch_size": 32,
-        "num_workers": 4
+        "batch_size": 24,
+        "num_workers": 8
     },
     "model": {
         "name": "STEGO",
-        "arch" : "dino",
-        "continuous" : true,
-        "dim" : 70,
-        "extra_clusters" : 0,
-        "bn_momentum" : null,
-        "bn_eps" : null,
+        "arch": "dino",
+        "continuous": true,
+        "dim": 70,
+        "extra_clusters": 0,
+        "bn_momentum": null,
+        "bn_eps": null,
         "pretrained": {
             "name": "dino",
             "model_type": "vit_small",
             "dino_patch_size": 8,
-            "dino_feat_type" : "feat",
-            "pretrained_weights" : null,
-            "projection_type" : "nonlinear",
-            "dropout" : true
-        }
+            "dino_feat_type": "feat",
+            "pretrained_weights": null,
+            "projection_type": "nonlinear",
+            "dropout": true
+        },
+        "K": 1024,
+        "initialize": "uni",
+        "initial" : null,
+        "temperature": 0.5
     },
     "loss": {
-        "name" :  "stego",
-        "zero_clamp" : true,
-        "pointwise" : true,
-        "stabilize" : false,
-        "feature_samples" : 11,
-        "neg_samples" : 5,
+        "name": "STEGO",
+        "is_weight_sum": true,
+        "vq_weight": 0.0,
+        "vq_loss": {
+            "e_weight": 0.0,
+            "q_weight" : 0.0,
+            "manage_weight": 0.0,
+            "intra_weight": 0.0,
+            "inter_weight": 0.0
+        },
+        "cross_weight": 0.0,
+        "cross_loss" : {
+            "temperature" : 0.5
+        },
         "correspondence_weight" : 1.0,
         "corr_loss" : {
             "neg_inter_weight": 0.63,
@@ -55,46 +68,46 @@
             "pos_inter_shift": 0.02,
             "pos_intra_shift": 0.08
         },
-        "vectorquantize_weight" : 0.0,
-        "vq_loss" : {
-            "e_weight" : 0.25,
-            "is_momentum_type": null
-        }
+        "zero_clamp" : true,
+        "pointwise" : true,
+        "stabilize" : false,
+        "feature_samples" : 11,
+        "neg_samples" : 5
     },
-
     "optimizer": {
-        "net" : {
-            "name" : "adam",
-            "lr" : 5e-4
+        "net": {
+            "name": "adam",
+            "lr": 5e-4
         },
-        "linear" : {
-            "name" : "adam",
-            "lr" : 5e-3
+        "cluster": {
+            "name": "adam",
+            "lr": 5e-3
         },
-        "cluster" : {
-            "name" : "adam",
-            "lr" : 5e-3
+        "linear": {
+            "name": "adam",
+            "lr": 5e-3
         }
     },
     "scheduler": {
+        "name" : "cos"
     },
     "train": {
         "print_freq": 25,
         "valid_freq": 100,
-        "epoch" : 1,
-        "freeze_encoder_bn" : false,
-        "freeze_all_bn" : -1,
-        "num_accum" : 1,
+        "epoch": 1,
+        "freeze_encoder_bn": false,
+        "freeze_all_bn": 1,
+        "num_accum": 1,
         "grad_norm": 10.0
-
     },
     "eval": {
-        "extra_clusters" : 0,
+        "extra_clusters": 0,
         "n_images": 5,
-        "is_crf" : true,
-        "is_visualize" : false,
-        "is_direct" :  false,
-        "is_diff" : false,
-        "linear_sep" : false
+        "is_crf": true,
+        "is_visualize": false,
+        "is_direct": false,
+        "is_diff": false,
+        "linear_sep": false,
+        "output" : "head"
     }
 }

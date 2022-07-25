@@ -18,7 +18,7 @@ from utils.common_utils import (save_checkpoint, parse, dprint, time_log, comput
 from utils.dist_utils import all_reduce_dict
 from utils.wandb_utils import set_wandb
 from utils.seg_utils import UnsupervisedMetrics, batched_crf, get_metrics
-from build import (build_model, build_criterion, build_dataset, build_dataloader, build_optimizer)
+from build import (build_model, build_criterion, build_dataset, build_dataloader, build_optimizer, build_scheduler)
 from pytorch_lightning.utilities.seed import seed_everything
 
 
@@ -60,7 +60,7 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
 
     # ------------------------ DataLoader ------------------------------#
     if is_train:
-        train_dataset = build_dataset(opt["dataset"], mode="train", model_type=opt["model"]["pretrained"]["model_type"])
+        train_dataset = build_dataset(opt["dataset"], mode="train", model_type=opt["model"]["pretrained"]["model_type"], name=opt["model"]["name"].lower())
         train_loader = build_dataloader(train_dataset, opt["dataloader"], shuffle=True)
     else:
         train_loader = None
@@ -149,8 +149,12 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
     # ------------------- Scheduler -----------------------#
     if is_train:
         num_accum = opt["train"]["num_accum"]
+        scheduler = build_scheduler(opt, optimizer, train_loader, start_epoch)
+        if start_epoch != 0:
+            scheduler.step(start_epoch + 1)
     else:
         num_accum = 1
+        scheduler = None
 
     timer = Timer()
     # --------------------------- Test --------------------------------#
@@ -160,7 +164,7 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
             model, cluster_model, linear_model,
             test_loader, device=device, opt=opt["eval"],
             n_classes=val_dataset.n_classes, data_type=opt["dataset"]["data_type"],
-            saved_dir=wandb_save_dir, is_crf=opt["eval"]["is_crf"], current_iter=best_iter)
+            saved_dir=wandb_save_dir, is_crf=opt["eval"]["is_crf"], current_iter=best_iter, out_type=opt["model"]["name"].lower())
         test_time = timer.update()
 
         s = time_log()
@@ -204,6 +208,9 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
 
         for i, data in enumerate(train_loader):
             img: torch.Tensor = data['img'].to(device, non_blocking=True)
+            out_type = opt["model"]["name"].lower()
+            if "stego" in out_type:
+                img_pos: torch.Tensor = data['img_pos'].to(device, non_blocking=True)
             label: torch.Tensor = data['label'].to(device, non_blocking=True)  # (b, h, w)
 
             data_time = timer.update()
@@ -219,23 +226,34 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
                 cluster_optimizer.zero_grad(set_to_none=True)
                 linear_optimizer.zero_grad(set_to_none=True)
 
-            model_input = (img, label)
-            model_output = model(img, current_iter)  # feats : (b, 384, 28, 28) codes : (b, 70, 28, 28)
 
+
+            model_input = (img, label)
+
+            model_output = model(img, current_iter)  # feats : (b, 384, 28, 28) codes : (b, 70, 28, 28)
+            if "stego" in out_type:
+                model_pos_output = model(img_pos, current_iter)
             output_type = opt["eval"]["output"].lower()
 
-            if output_type == "vq":
-                out = F.interpolate(model_output[1][0], label.shape[-2:], mode='bilinear', align_corners=False)
-            elif output_type == "head":
-                out = F.interpolate(model_output[0][0], label.shape[-2:], mode='bilinear', align_corners=False)
+
+            if "hoi" in out_type:
+                if output_type == "vq":
+                    out = F.interpolate(model_output[1][0], label.shape[-2:], mode='bilinear', align_corners=False)
+                elif output_type == "head":
+                    out = F.interpolate(model_output[0][0], label.shape[-2:], mode='bilinear', align_corners=False)
+                else:
+                    raise ValueError(f"Unsupported loss type {output_type}")
+            elif "stego" in out_type:
+                out = F.interpolate(model_output[1], label.shape[-2:], mode='bilinear', align_corners=False)
             else:
-                raise ValueError(f"Unsupported loss type {output_type}")
+                raise ValueError(f"Unsupported loss type {out_type}")
 
             detached_code = torch.clone(out)
             linear_output = linear_model(detached_code)
             cluster_output = cluster_model(detached_code, None)
             loss, loss_dict, vq_dict = criterion(model_input=model_input,
                                         model_output=model_output,
+                                        model_pos_output=model_pos_output if "stego" in out_type else None,
                                         linear_output=linear_output,
                                         cluster_output=cluster_output)
 
@@ -260,6 +278,7 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
                 optimizer.step()
                 cluster_optimizer.step()
                 linear_optimizer.step()
+                scheduler.step()
                 current_iter += 1
 
             backward_time = timer.update()
@@ -315,7 +334,7 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
                 _ = timer.update()
                 valid_loss, valid_metrics = evaluate(
                     model, cluster_model, linear_model, val_loader, device=device, opt=opt["eval"],
-                    n_classes=val_dataset.n_classes, current_iter=current_iter)
+                    n_classes=val_dataset.n_classes, current_iter=current_iter, out_type=opt["model"]["name"].lower())
                 valid_time = timer.update()
 
                 s = time_log()
@@ -375,7 +394,7 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
 
     best_loss, best_metrics = evaluate(
         model, cluster_model, linear_model, val_loader, device=device, opt=opt["eval"],
-        n_classes=train_dataset.n_classes, is_crf=opt["eval"]["is_crf"], current_iter=best_iter)
+        n_classes=train_dataset.n_classes, is_crf=opt["eval"]["is_crf"], current_iter=best_iter, out_type=opt["model"]["name"].lower())
 
     s = time_log()
     s += f"[BEST] ---------------------------------------------\n"
@@ -393,7 +412,7 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
     linear_model.load_state_dict(latest_checkpoint['linear_model_state_dict'], strict=True)
     best_loss, best_metrics = evaluate(
         model, cluster_model, linear_model, val_loader, device=device, opt=opt["eval"],
-        n_classes=train_dataset.n_classes, current_iter=current_iter)
+        n_classes=train_dataset.n_classes, current_iter=current_iter, out_type=opt["model"]["name"].lower())
 
     s = time_log()
     s += f"[LATEST] ---------------------------------------------\n"
@@ -418,7 +437,8 @@ def evaluate(model: nn.Module,
              is_crf: bool = False,
              data_type: str = "",
              saved_dir: str = "",
-             current_iter: int = 0
+             current_iter: int = 0,
+             out_type : str = "hoi"
              ) -> Tuple[float, Dict[str, float]]:  # noqa
     # opt = opt["eval"]
 
@@ -440,14 +460,17 @@ def evaluate(model: nn.Module,
             label: torch.Tensor = data['label'].to(device, non_blocking=True)
             img_path: str = data['img_path']
 
-            code, quantized, assignment, distance = model(img, current_iter)
+            model_output = model(img, current_iter) # code, quantized, ass, distance
 
-            if output_type == "vq":
-                out = F.interpolate(quantized, label.shape[-2:], mode='bilinear', align_corners=False)
-            elif output_type == "head":
-                out = F.interpolate(code, label.shape[-2:], mode='bilinear', align_corners=False)
+            if out_type == "stego":
+                out = F.interpolate(model_output[1], label.shape[-2:], mode='bilinear', align_corners=False)
             else:
-                raise ValueError(f"Unsupported loss type {output_type}")
+                if output_type == "vq":
+                    out = F.interpolate(model_output[1], label.shape[-2:], mode='bilinear', align_corners=False)
+                elif output_type == "head":
+                    out = F.interpolate(model_output[0], label.shape[-2:], mode='bilinear', align_corners=False)
+                else:
+                    raise ValueError(f"Unsupported loss type {output_type}")
 
             if is_crf:
                 linear_preds = torch.log_softmax(linear_model(out), dim=1)

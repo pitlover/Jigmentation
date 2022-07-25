@@ -5,8 +5,8 @@
     "wandb": {
         "project": "Jigmentation",
         "entity": "00310214aa-",
-        "name": "HOI_0_32",
-        "memo": "HOI_32",
+        "name": "HOI_64_patch",
+        "memo": "HOI_64_patch",
         "mode": "online"
     },
     "dataset": {
@@ -19,7 +19,7 @@
         "num_neighbors": 7
     },
     "dataloader": {
-        "batch_size": 24,
+        "batch_size": 4,
         "num_workers": 8
     },
     "model": {
@@ -39,20 +39,21 @@
             "projection_type": "nonlinear",
             "dropout": true
         },
-        "K": 32,
-        "initialize": "normal",
+        "K": 64,
+        "initialize": "uni",
+        "initial": "kmeans",
         "temperature": 0.5
     },
     "loss": {
         "name": "HOI",
         "is_weight_sum": true,
-        "vq_weight": 1.0,
+        "vq_weight": 0.0,
         "vq_loss": {
             "e_weight": 0.0,
             "q_weight" : 0.0,
-            "manage_weight": 1.0,
+            "manage_weight": 0.0,
             "intra_weight": 0.0,
-            "inter_weight": 1.0
+            "inter_weight": 0.0
         },
         "cross_weight": 1.0,
         "cross_loss" : {
@@ -61,27 +62,28 @@
     },
     "optimizer": {
         "net": {
-            "name": "sgd",
-            "lr": 5e-4,
-            "weight_decay": 2.0
+            "name": "adam",
+            "lr": 3e-4,
+            "weight_decay": 10e-6
         },
         "cluster": {
             "name": "adam",
-            "lr": 5e-3
+            "lr": 3e-3
         },
         "linear": {
             "name": "adam",
-            "lr": 5e-3
+            "lr": 3e-3
         }
     },
     "scheduler": {
+        "name" : "cos"
     },
     "train": {
         "print_freq": 25,
         "valid_freq": 100,
-        "epoch": 4,
+        "epoch": 1,
         "freeze_encoder_bn": false,
-        "freeze_all_bn": -1,
+        "freeze_all_bn": 1,
         "num_accum": 1,
         "grad_norm": 10.0
     },

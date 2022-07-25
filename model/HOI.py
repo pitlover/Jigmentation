@@ -7,7 +7,8 @@ import kornia.augmentation as Kg
 from utils.layer_utils import ClusterLookup
 from model.dino.DinoFeaturizer import DinoFeaturizer
 import torchvision.transforms as transforms
-
+import numpy as np
+from kmeans_pytorch import kmeans
 
 class HOI(nn.Module):
     # opt["model"]
@@ -38,10 +39,13 @@ class HOI(nn.Module):
         self.vq = nn.Parameter(torch.rand(self.K, dim), requires_grad=True)
         self._vq_initialize(self.vq)
 
-        self._vq_initialized_from_batch = False
+        if self.opt["initial"] == None:
+            self._vq_initialized_from_batch = True
+        else:
+            self._vq_initialized_from_batch = False
 
         self.vq0_update = torch.zeros(self.K)
-        self.dropout = nn.Dropout(p=0.3)
+        # self.dropout = nn.Dropout(p=0.3)
 
     def _get_temperature(self, cur_iter):
         # TODO get temperature
@@ -51,7 +55,7 @@ class HOI(nn.Module):
     def _get_gate(self, cur_iter):
         # TODO get gate
         return 0.0
-        # return max((10000 - cur_iter) / 10000, 0.0)  # 0 -> 1, 1000 -> 0
+        #return max((10000 - cur_iter) / 10000, 0.0)  # 0 -> 1, 1000 -> 0
 
     def _vq_initialize(self, vq):  # TODO vq initialize
         initial_type = self.opt["initialize"].lower()
@@ -90,15 +94,25 @@ class HOI(nn.Module):
 
         if not self._vq_initialized_from_batch:
             with torch.no_grad():
-                random_select = list(range(b * h * w))
-                random.shuffle(random_select)
-                selected_indices = random_select[:k]
-                codebook.data.copy_(flat[selected_indices])
+                initialtype = self.opt["initial"]
+                if initialtype == "rand":
+                    random_select = list(range(b * h * w))
+                    random.shuffle(random_select)
+                    selected_indices = random_select[:k]
+                    codebook.data.copy_(flat[selected_indices])
+
+                elif initialtype == "kmeans":
+                    cluster_ids_x, cluster_centers = kmeans(
+                        X=flat, num_clusters=k, distance='euclidean', device=torch.device('cuda')
+                    )
+                    codebook.data.copy_(cluster_centers)
+                else:
+                    raise ValueError(f"Unsupported vq initial type {initialtype}.")
             self._vq_initialized_from_batch = True
 
         code = codebook  # (K, c)
 
-        code = self.dropout(code)
+        # code = self.dropout(code)
         # code = F.normalize(codebook, dim=1)
 
         # distance = flat.unsqueeze(1) - code.unsqueeze(0)  # (bhw, 1, c) - (1, K, c) = (bhw, K, c)
@@ -109,7 +123,7 @@ class HOI(nn.Module):
                     - 2 * torch.matmul(flat, code.t()))  # (bhw, K)
         # smaller distance == higher probability
 
-        prob = torch.softmax(-distance / self._get_temperature(cur_iter), dim=-1)  # (bhw, K)
+        prob = torch.softmax(-distance / self._get_temperature(cur_iter), dim=1)  # (bhw, K)
         assignment = prob.view(b, h, w, -1).permute(0, 3, 1, 2).contiguous()  # (b, K, h, w)
 
         q_feat = torch.matmul(prob, code)  # (bhw, K) x (K, c) = (bhw, c)
@@ -128,15 +142,20 @@ class HOI(nn.Module):
         return out_feat, assignment, distance
 
     def _Augmentation(self, x: torch.Tensor):
-        Augmentation = nn.Sequential(
-            Kg.RandomResizedCrop(size=(x.shape[-2], x.shape[-1])),
-            Kg.RandomHorizontalFlip(p=0.5),
-            # transforms.ColorJitter(brightness=.4, contrast=.4, saturation=.4, hue=.8),
-            Kg.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.1, p=0.8),
-            Kg.RandomGrayscale(p=0.2),
-            # TODO add gaussian blur?
-            # Kg.RandomGaussianBlur((int(0.1 * x.shape[1]), int(0.1 * x.shape[2])), (0.1, 2.0), p=0.5)
-        )
+        # Augmentation = nn.Sequential(
+        #     # TODO flip ok?
+        #     # Kg.RandomHorizontalFlip(p=0.5),
+        #     Kg.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.1, p=0.8),
+        #     Kg.RandomGrayscale(p=0.2),
+        #     # TODO add gaussian blur?
+        #     # Kg.RandomGaussianBlur((int(0.1 * x.shape[1]), int(0.1 * x.shape[2])), (0.1, 2.0), p=0.5)
+        # )
+
+        Augmentation = transforms.Compose([
+            transforms.ColorJitter(brightness=.3, contrast=.3, saturation=.3, hue=.1),
+            transforms.RandomGrayscale(.2),
+            transforms.RandomApply([transforms.GaussianBlur((5, 5))])
+        ])
 
         return Augmentation(x)
 

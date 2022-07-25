@@ -30,8 +30,8 @@ class STEGOmodel(nn.Module):
         self.linear_probe = nn.Conv2d(dim, n_classes, (1, 1))
 
 
-    def forward(self, x: torch.Tensor):
-        return self.net(x)[1]
+    def forward(self, x: torch.Tensor, cur_iter:int):
+        return self.net(x)
 
     @classmethod
     def build(cls, opt, n_classes):

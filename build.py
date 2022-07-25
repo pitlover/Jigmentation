@@ -19,15 +19,12 @@ def build_model(opt: dict, n_classes: int = 27, is_direct: bool = False):
     # opt = opt["model"]
     model_type = opt["name"].lower()
 
-    cluster_model = ClusterLookup(n_classes, n_classes + opt["extra_clusters"])
     if "stego" in model_type:
         model = STEGOmodel.build(
             opt=opt,
             n_classes=n_classes
         )
-        net_model = model.net
-        linear_model = model.linear_probe
-        cluster_model = model.cluster_probe
+
     elif "dulli" in model_type:
         model = DULLI.build(
             opt=opt,
@@ -60,7 +57,7 @@ def build_model(opt: dict, n_classes: int = 27, is_direct: bool = False):
             if isinstance(module, (nn.BatchNorm1d, nn.BatchNorm2d, nn.SyncBatchNorm)):
                 module.eps = bn_eps
 
-    if model_type in ["dino", "dulli", "hoi"]:
+    if model_type in ["dino", "dulli", "hoi", "stego"]:
         return model, model.cluster_probe, model.linear_probe
 
 
@@ -71,6 +68,8 @@ def build_criterion(n_classes: int, batch_size: int, opt: dict):
         loss = DulliLoss(cfg=opt)
     elif "hoi" in loss_name:
         loss = HoiLoss(n_classes=n_classes, batch_size=batch_size, cfg=opt)
+    elif "stego" in loss_name:
+        loss = StegoLoss(n_classes=n_classes, cfg=opt, corr_weight=opt["correspondence_weight"])
     else:
         raise ValueError(f"Unsupported loss type {loss_name}")
 
@@ -114,7 +113,7 @@ def build_optimizer(main_params, cluster_params, linear_params, opt: dict, model
     # opt = opt["optimizer"]
     model_type = model_type.lower()
 
-    if "dulli" in model_type or "hoi" in model_type:
+    if "dulli" in model_type or "hoi" in model_type or "stego" in model_type :
         net_optimizer_type = opt["net"]["name"].lower()
         if net_optimizer_type == "adam":
             net_optimizer = Adam(main_params, lr=opt["net"]["lr"])
@@ -176,7 +175,7 @@ def build_scheduler(opt: dict, optimizer, loader, start_epoch):
     return scheduler
 
 
-def build_dataset(opt: dict, mode: str = "train", model_type: str = "dino") -> ContrastiveSegDataset:
+def build_dataset(opt: dict, mode: str = "train", model_type: str = "dino", name : str = "hoi") -> ContrastiveSegDataset:
     # opt = opt["dataset"]
     data_type = opt["data_type"].lower()
 
@@ -191,20 +190,38 @@ def build_dataset(opt: dict, mode: str = "train", model_type: str = "dino") -> C
             T.RandomApply([T.GaussianBlur((5, 5))])
         ])
 
-        return ContrastiveSegDataset(
-            pytorch_data_dir=opt["data_path"],
-            dataset_name=opt["data_type"],
-            crop_type=opt["crop_type"],
-            model_type=model_type,
-            image_set=mode,
-            transform=get_transform(opt["res"], False, opt["loader_crop_type"]),
-            target_transform=get_transform(opt["res"], True, opt["loader_crop_type"]),
-            cfg=opt,
-            num_neighbors=opt["num_neighbors"],
-            mask=True,
-            pos_images=False,
-            pos_labels=False
-        )
+        if "stego" == name:
+            return ContrastiveSegDataset(
+                pytorch_data_dir=opt["data_path"],
+                dataset_name=opt["data_type"],
+                crop_type=opt["crop_type"],
+                model_type=model_type,
+                image_set=mode,
+                transform=get_transform(opt["res"], False, opt["loader_crop_type"]),
+                target_transform=get_transform(opt["res"], True, opt["loader_crop_type"]),
+                cfg=opt,
+                aug_geometric_transform=geometric_transforms,
+                aug_photometric_transform=photometric_transforms,
+                num_neighbors=opt["num_neighbors"],
+                mask=True,
+                pos_images=True,
+                pos_labels=True
+            )
+        else:
+            return ContrastiveSegDataset(
+                pytorch_data_dir=opt["data_path"],
+                dataset_name=opt["data_type"],
+                crop_type=opt["crop_type"],
+                model_type=model_type,
+                image_set=mode,
+                transform=get_transform(opt["res"], False, opt["loader_crop_type"]),
+                target_transform=get_transform(opt["res"], True, opt["loader_crop_type"]),
+                cfg=opt,
+                num_neighbors=opt["num_neighbors"],
+                mask=True,
+                pos_images=False,
+                pos_labels=False
+            )
     elif mode == "val" or mode == "test":
         if mode == "test":
             loader_crop = "center"
