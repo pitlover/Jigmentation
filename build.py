@@ -1,4 +1,6 @@
 from typing import Optional, Dict
+
+import torch
 from torch.optim import Adam, AdamW, SGD
 import torch.distributed as dist
 from torch.utils.data.distributed import DistributedSampler
@@ -12,10 +14,12 @@ from loss import *
 from utils.layer_utils import ClusterLookup
 from model.DULLI import DULLI
 from model.HOI import HOI
+from model.BOB import BOB
+from model.JIRANO import JIRANO
 from torch.optim.lr_scheduler import CosineAnnealingLR
 
 
-def build_model(opt: dict, n_classes: int = 27, is_direct: bool = False):
+def build_model(opt: dict, n_classes: int = 27, device: torch.device = "cuda"):
     # opt = opt["model"]
     model_type = opt["name"].lower()
 
@@ -34,7 +38,22 @@ def build_model(opt: dict, n_classes: int = 27, is_direct: bool = False):
     elif "hoi" in model_type:
         model = HOI.build(
             opt=opt,
-            n_classes=n_classes
+            n_classes=n_classes,
+            device=device
+        )
+
+    elif "bob" in model_type:
+        model = BOB.build(
+            opt=opt,
+            n_classes=n_classes,
+            device=device
+        )
+
+    elif "jirano" in model_type:
+        model = JIRANO.build(
+            opt=opt,
+            n_classes=n_classes,
+            device=device
         )
 
     elif model_type == "dino":
@@ -57,7 +76,7 @@ def build_model(opt: dict, n_classes: int = 27, is_direct: bool = False):
             if isinstance(module, (nn.BatchNorm1d, nn.BatchNorm2d, nn.SyncBatchNorm)):
                 module.eps = bn_eps
 
-    if model_type in ["dino", "dulli", "hoi", "stego"]:
+    if model_type in ["dino", "dulli", "hoi", "bob", "stego", "jirano"]:
         return model, model.cluster_probe, model.linear_probe
 
 
@@ -68,8 +87,12 @@ def build_criterion(n_classes: int, batch_size: int, opt: dict):
         loss = DulliLoss(cfg=opt)
     elif "hoi" in loss_name:
         loss = HoiLoss(n_classes=n_classes, batch_size=batch_size, cfg=opt)
+    elif "bob" in loss_name:
+        loss = BobLoss(n_classes=n_classes, batch_size=batch_size, cfg=opt)
     elif "stego" in loss_name:
-        loss = StegoLoss(n_classes=n_classes, cfg=opt, corr_weight=opt["correspondence_weight"])
+        loss = StegoLoss(n_classes=n_classes, cfg=opt)
+    elif "jirano" in loss_name:  # TODO JIRANO loss
+        loss = JiranoLoss(n_classes=n_classes, cfg=opt)
     else:
         raise ValueError(f"Unsupported loss type {loss_name}")
 
@@ -78,33 +101,32 @@ def build_criterion(n_classes: int, batch_size: int, opt: dict):
 
 def split_params_for_optimizer(model, opt):
     # opt = opt["optimizer"]
-    params_small_lr = []
-    params_small_lr_no_wd = []
+    params_large_lr = []
+    params_large_lr_no_wd = []
     params_base_lr = []
     params_base_lr_no_wd = []
     for param_name, param_value in model.named_parameters():
         param_value: torch.Tensor
         if not param_value.requires_grad:
             continue
-        if "encoder" in param_name:
+        if "vq" in param_name:
             if (param_value.ndim > 1) and ("position" not in param_name):
-                params_small_lr.append(param_value)
+                params_large_lr.append(param_value)
             else:
-                params_small_lr_no_wd.append(param_value)
+                params_large_lr_no_wd.append(param_value)
         else:  # decoder
             if (param_value.ndim > 1) and ("position" not in param_name):
                 params_base_lr.append(param_value)
             else:
                 params_base_lr_no_wd.append(param_value)
 
-    same_lr = opt.get("same_lr", True)
-    encoder_weight = 1.0 if same_lr else 0.1
+    encoder_weight = opt["vq_optim_weight"]
     params_for_optimizer = [
         {"params": params_base_lr},
         {"params": params_base_lr_no_wd, "weight_decay": 0.0},
         # {"params": params_small_lr, "lr": opt["lr"] * encoder_weight, "weight_decay": opt["weight_decay"] * 0.1},
-        {"params": params_small_lr, "lr": opt["lr"] * encoder_weight},
-        {"params": params_small_lr_no_wd, "lr": opt["lr"] * encoder_weight, "weight_decay": 0.0},
+        {"params": params_large_lr, "lr": opt["net"]["lr"] * encoder_weight},
+        {"params": params_large_lr_no_wd, "lr": opt["net"]["lr"] * encoder_weight, "weight_decay": 0.0},
     ]
     return params_for_optimizer
 
@@ -113,7 +135,7 @@ def build_optimizer(main_params, cluster_params, linear_params, opt: dict, model
     # opt = opt["optimizer"]
     model_type = model_type.lower()
 
-    if "dulli" in model_type or "hoi" in model_type or "stego" in model_type :
+    if "dulli" in model_type or "hoi" in model_type or "stego" in model_type or "bob" in model_type or "jirano" in model_type:
         net_optimizer_type = opt["net"]["name"].lower()
         if net_optimizer_type == "adam":
             net_optimizer = Adam(main_params, lr=opt["net"]["lr"])
@@ -175,7 +197,7 @@ def build_scheduler(opt: dict, optimizer, loader, start_epoch):
     return scheduler
 
 
-def build_dataset(opt: dict, mode: str = "train", model_type: str = "dino", name : str = "hoi") -> ContrastiveSegDataset:
+def build_dataset(opt: dict, mode: str = "train", model_type: str = "dino", name: str = "hoi") -> ContrastiveSegDataset:
     # opt = opt["dataset"]
     data_type = opt["data_type"].lower()
 
@@ -190,7 +212,23 @@ def build_dataset(opt: dict, mode: str = "train", model_type: str = "dino", name
             T.RandomApply([T.GaussianBlur((5, 5))])
         ])
 
-        if "stego" == name:
+        if "hoi" == name: # cross_loss
+            return ContrastiveSegDataset(
+                pytorch_data_dir=opt["data_path"],
+                dataset_name=opt["data_type"],
+                crop_type=opt["crop_type"],
+                model_type=model_type,
+                image_set=mode,
+                transform=get_transform(opt["res"], False, opt["loader_crop_type"]),
+                target_transform=get_transform(opt["res"], True, opt["loader_crop_type"]),
+                cfg=opt,
+                num_neighbors=opt["num_neighbors"],
+                mask=True,
+                pos_images=True,  # HOI + Stego
+                pos_labels=True
+            )
+
+        elif name in ["bob", "stego", "jirano"]:
             return ContrastiveSegDataset(
                 pytorch_data_dir=opt["data_path"],
                 dataset_name=opt["data_type"],
@@ -207,6 +245,7 @@ def build_dataset(opt: dict, mode: str = "train", model_type: str = "dino", name
                 pos_images=True,
                 pos_labels=True
             )
+
         else:
             return ContrastiveSegDataset(
                 pytorch_data_dir=opt["data_path"],
@@ -217,11 +256,14 @@ def build_dataset(opt: dict, mode: str = "train", model_type: str = "dino", name
                 transform=get_transform(opt["res"], False, opt["loader_crop_type"]),
                 target_transform=get_transform(opt["res"], True, opt["loader_crop_type"]),
                 cfg=opt,
+                aug_geometric_transform=geometric_transforms,
+                aug_photometric_transform=photometric_transforms,
                 num_neighbors=opt["num_neighbors"],
                 mask=True,
                 pos_images=False,
                 pos_labels=False
             )
+
     elif mode == "val" or mode == "test":
         if mode == "test":
             loader_crop = "center"

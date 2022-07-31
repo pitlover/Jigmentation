@@ -1,5 +1,5 @@
-import time
 from typing import Dict, Tuple
+import os
 import argparse
 from functools import partial
 import torch
@@ -10,7 +10,6 @@ import torch.distributed as dist
 from torch.nn.parallel.distributed import DistributedDataParallel
 from torch.utils.data.dataloader import DataLoader
 import wandb
-import os
 from tqdm import tqdm
 from visualize import visualization
 from utils.common_utils import (save_checkpoint, parse, dprint, time_log, compute_param_norm,
@@ -18,7 +17,8 @@ from utils.common_utils import (save_checkpoint, parse, dprint, time_log, comput
 from utils.dist_utils import all_reduce_dict
 from utils.wandb_utils import set_wandb
 from utils.seg_utils import UnsupervisedMetrics, batched_crf, get_metrics
-from build import (build_model, build_criterion, build_dataset, build_dataloader, build_optimizer, build_scheduler)
+from build import (build_model, build_criterion, build_dataset, build_dataloader, build_optimizer, build_scheduler,
+                   split_params_for_optimizer)
 from pytorch_lightning.utilities.seed import seed_everything
 
 
@@ -60,7 +60,8 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
 
     # ------------------------ DataLoader ------------------------------#
     if is_train:
-        train_dataset = build_dataset(opt["dataset"], mode="train", model_type=opt["model"]["pretrained"]["model_type"], name=opt["model"]["name"].lower())
+        train_dataset = build_dataset(opt["dataset"], mode="train", model_type=opt["model"]["pretrained"]["model_type"],
+                                      name=opt["model"]["name"].lower())
         train_loader = build_dataloader(train_dataset, opt["dataloader"], shuffle=True)
     else:
         train_loader = None
@@ -74,19 +75,18 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
                                    batch_size=1)
 
     # -------------------------- Define -------------------------------#
+    device = torch.device("cuda", local_rank)  # "cuda:0" for single GPU
     model, cluster_model, linear_model = build_model(opt=opt["model"],
                                                      n_classes=val_dataset.n_classes,
-                                                     is_direct=opt["eval"]["is_direct"])  # CPU model
+                                                     device=device)  # CPU model
 
     criterion = build_criterion(n_classes=val_dataset.n_classes,
                                 batch_size=opt["dataloader"]["batch_size"],
                                 opt=opt["loss"])  # CPU criterion
 
-    device = torch.device("cuda", local_rank)  # "cuda:0" for single GPU
     model = model.to(device)
     cluster_model = cluster_model.to(device)
     linear_model = linear_model.to(device)
-
     criterion = criterion.to(device)
 
     # ----------------------- Distributed ----------------------------#
@@ -111,8 +111,11 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
 
     # ------------------- Optimizer  -----------------------#
     if is_train:
+        # TODO split_params right?
+        paramas_for_optimizer = split_params_for_optimizer(model_m, opt["optimizer"])
+        # paramas_for_optimizer = model_m.parameters()
         optimizer, cluster_optimizer, linear_optimizer = build_optimizer(
-            main_params=model_m.parameters(),
+            main_params=paramas_for_optimizer,
             cluster_params=cluster_model.parameters(),
             linear_params=linear_model.parameters(),
             opt=opt["optimizer"],
@@ -164,7 +167,8 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
             model, cluster_model, linear_model,
             test_loader, device=device, opt=opt["eval"],
             n_classes=val_dataset.n_classes, data_type=opt["dataset"]["data_type"],
-            saved_dir=wandb_save_dir, is_crf=opt["eval"]["is_crf"], current_iter=best_iter, out_type=opt["model"]["name"].lower())
+            saved_dir=wandb_save_dir, is_crf=opt["eval"]["is_crf"], current_iter=best_iter,
+            out_type=opt["model"]["name"].lower())
         test_time = timer.update()
 
         s = time_log()
@@ -209,7 +213,8 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
         for i, data in enumerate(train_loader):
             img: torch.Tensor = data['img'].to(device, non_blocking=True)
             out_type = opt["model"]["name"].lower()
-            if "stego" in out_type:
+
+            if opt["loss"]["corr_weight"] > 0.0:
                 img_pos: torch.Tensor = data['img_pos'].to(device, non_blocking=True)
             label: torch.Tensor = data['label'].to(device, non_blocking=True)  # (b, h, w)
 
@@ -226,36 +231,53 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
                 cluster_optimizer.zero_grad(set_to_none=True)
                 linear_optimizer.zero_grad(set_to_none=True)
 
-
-
             model_input = (img, label)
+            model_output = model(img, cur_iter=current_iter)  # head : (b, 70, 28, 28) quantized : (b, 70, 28, 28)
+            #  x, qx, assignment, distance, recon, feat
 
-            model_output = model(img, current_iter)  # feats : (b, 384, 28, 28) codes : (b, 70, 28, 28)
-            if "stego" in out_type:
-                model_pos_output = model(img_pos, current_iter)
+            # TODO check pos->raw or qutized?
+            model_pos_output = None
+            if opt["loss"]["corr_weight"] > 0.0:
+                if "hoi" in opt["model"]["name"].lower():
+                    model_pos_output = model(img_pos, cur_iter=current_iter, is_pos=True)
+                else:
+                    model_pos_output = model(img_pos, cur_iter=current_iter)
+
             output_type = opt["eval"]["output"].lower()
-
 
             if "hoi" in out_type:
                 if output_type == "vq":
-                    out = F.interpolate(model_output[1][0], label.shape[-2:], mode='bilinear', align_corners=False)
+                    out = model_output[1][0]
                 elif output_type == "head":
-                    out = F.interpolate(model_output[0][0], label.shape[-2:], mode='bilinear', align_corners=False)
+                    out = model_output[0][0]
+                else:
+                    raise ValueError(f"Unsupported loss type {output_type}")
+            elif out_type in ["bob", "jirano"]:
+                if output_type == "vq":
+                    out = model_output[1]
+                elif output_type == "head":
+                    out = model_output[0]
                 else:
                     raise ValueError(f"Unsupported loss type {output_type}")
             elif "stego" in out_type:
-                out = F.interpolate(model_output[1], label.shape[-2:], mode='bilinear', align_corners=False)
+                out = model_output[1]
             else:
                 raise ValueError(f"Unsupported loss type {out_type}")
 
-            detached_code = torch.clone(out)
+            detached_code = torch.clone(out.detach())
             linear_output = linear_model(detached_code)
+
             cluster_output = cluster_model(detached_code, None)
-            loss, loss_dict, vq_dict = criterion(model_input=model_input,
-                                        model_output=model_output,
-                                        model_pos_output=model_pos_output if "stego" in out_type else None,
-                                        linear_output=linear_output,
-                                        cluster_output=cluster_output)
+            loss, loss_dict, vq_dict, corr_dict = criterion(model_input=model_input,
+                                                            model_output=model_output,
+                                                            model_pos_output=model_pos_output if model_pos_output is not None else None,
+                                                            linear_output=linear_output,
+                                                            cluster_output=cluster_output)
+            # print("detached", detached_code[0])
+            # print("detached", detached_code.shape)
+            # print("linear", linear_output[0])
+            # print("linear", linear_output.shape)
+            # print("#########################")
 
             forward_time = timer.update()
 
@@ -297,7 +319,10 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
                     for loss_k, loss_v in loss_dict.items():
                         if loss_k != "loss":
                             s += f"-- {loss_k}(now): {loss_v:.6f}\n"
-                            if loss_k == "vq":
+                            if loss_k == "corr":
+                                for k, v in corr_dict.items():
+                                    s += f"  -- {k}(now): {v:.6f}\n"
+                            elif loss_k == "vq":
                                 for k, v in vq_dict.items():
                                     s += f"  -- {k}(now): {v:.6f}\n"
                 s += f"time(data/fwd/bwd): {data_time:.3f}/{forward_time:.3f}/{backward_time:.3f}\n"
@@ -308,33 +333,26 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
                 print_fn(s)
 
                 if is_master:
-                    if opt["loss"]["vq_weight"] > 0.0:
-                        wandb.log({
-                            "epoch": current_epoch,
-                            "iters": current_iter,
-                            "train_loss": loss_dict['loss'],
-                            "net_lr": optimizer.param_groups[0]['lr'],
-                            "[0]vq_loss": vq_dict["[0]q_loss"],
-                            "[1]vq_loss": vq_dict["[1]q_loss"],
-                            "param_norm": p_norm.item(),
-                            "grad_norm": g_norm.item(),
-                        })
-                    else:
-                        wandb.log({
-                            "epoch": current_epoch,
-                            "iters": current_iter,
-                            "train_loss": loss_dict['loss'],
-                            "net_lr": optimizer.param_groups[0]['lr'],
-                            "param_norm": p_norm.item(),
-                            "grad_norm": g_norm.item(),
-                        })
+                    wandb.log({
+                        "epoch": current_epoch,
+                        "iters": current_iter,
+                        "train_loss": loss_dict['loss'],
+                        "STEGO_loss": loss_dict["corr"] if opt["loss"].get("corr_weight", 0) > 0 else 0,
+                        'vq_loss': loss_dict["vq"] if opt["loss"].get("vq_weight", 0) > 0 else 0,
+                        'recon_loss': loss_dict["recon"] if opt["loss"].get("recon_weight", 0) > 0 else 0,
+                        "net_lr": optimizer.param_groups[0]['lr'],
+                        "param_norm": p_norm.item(),
+                        "grad_norm": g_norm.item(),
+                    })
 
             # --------------------------- Valid --------------------------------#
             if ((i + 1) % valid_freq == 0) or ((i + 1) == len(train_loader)):
                 _ = timer.update()
                 valid_loss, valid_metrics = evaluate(
-                    model, cluster_model, linear_model, val_loader, device=device, opt=opt["eval"],
-                    n_classes=val_dataset.n_classes, current_iter=current_iter, out_type=opt["model"]["name"].lower())
+                    model, cluster_model, linear_model, val_loader, device=device,
+                    opt=opt["eval"],
+                    n_classes=val_dataset.n_classes,
+                    out_type=opt["model"]["name"].lower())
                 valid_time = timer.update()
 
                 s = time_log()
@@ -354,7 +372,9 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
                     s += f"[VAL] -------- updated ({metric})! {prev_best_metric:.6f} -> {best_metric:.6f}\n"
                     if is_master:
                         save_checkpoint(
-                            "best", model, optimizer, cluster_model, cluster_optimizer, linear_model, linear_optimizer,
+                            "best", model, optimizer,
+                            cluster_model, cluster_optimizer,
+                            linear_model, linear_optimizer,
                             current_epoch, current_iter, best_metric, wandb_save_dir, model_only=True)
                     for metric_k, metric_v in valid_metrics.items():
                         s += f"[VAL] {metric_k} : {best_valid_metrics[metric_k]:.6f} -> {metric_v:.6f}\n"
@@ -374,6 +394,8 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
                     wandb.log(valid_metrics)
 
                 model.train()
+                linear_model.train()
+                cluster_model.train()
                 train_stats.reset()
 
             _ = timer.update()
@@ -394,7 +416,8 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
 
     best_loss, best_metrics = evaluate(
         model, cluster_model, linear_model, val_loader, device=device, opt=opt["eval"],
-        n_classes=train_dataset.n_classes, is_crf=opt["eval"]["is_crf"], current_iter=best_iter, out_type=opt["model"]["name"].lower())
+        n_classes=train_dataset.n_classes, is_crf=opt["eval"]["is_crf"], current_iter=best_iter,
+        out_type=opt["model"]["name"].lower())
 
     s = time_log()
     s += f"[BEST] ---------------------------------------------\n"
@@ -438,7 +461,7 @@ def evaluate(model: nn.Module,
              data_type: str = "",
              saved_dir: str = "",
              current_iter: int = 0,
-             out_type : str = "hoi"
+             out_type: str = "hoi"
              ) -> Tuple[float, Dict[str, float]]:  # noqa
     # opt = opt["eval"]
 
@@ -460,7 +483,7 @@ def evaluate(model: nn.Module,
             label: torch.Tensor = data['label'].to(device, non_blocking=True)
             img_path: str = data['img_path']
 
-            model_output = model(img, current_iter) # code, quantized, ass, distance
+            model_output = model(img, cur_iter=current_iter)  # code, quantized, ass, distance
 
             if out_type == "stego":
                 out = F.interpolate(model_output[1], label.shape[-2:], mode='bilinear', align_corners=False)

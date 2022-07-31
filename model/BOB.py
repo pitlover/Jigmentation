@@ -11,7 +11,7 @@ import numpy as np
 from kmeans_pytorch import kmeans
 
 
-class HOI(nn.Module):
+class BOB(nn.Module):
     # opt["model"]
     def __init__(self,
                  opt: dict,
@@ -40,8 +40,16 @@ class HOI(nn.Module):
         self.normalize = opt["normalize"]
         self.device = device
 
+        self.out_channel = self.opt["num_feats"]
+        # TODO Bob decoder
+        self.decoder = BOB_decoder(
+            opt=self.opt["decoder"],
+            in_channel=self.embedding_dim,
+            out_channel=self.out_channel
+        )
+
         self.vq = nn.Parameter(torch.rand(self.K, dim), requires_grad=True)
-        self._vq_initialize(self.vq)
+        self._vq_initialize()
 
         if self.opt["initial"] == None:
             self._vq_initialized_from_batch = True
@@ -49,6 +57,8 @@ class HOI(nn.Module):
             self._vq_initialized_from_batch = False
 
         self.vq0_update = torch.zeros(self.K, device=self.device)
+        self.restart = self.opt["restart"]
+        self.num_update = 0
         # self.dropout = nn.Dropout(p=0.3)
 
     def _get_temperature(self, cur_iter):
@@ -61,22 +71,21 @@ class HOI(nn.Module):
         return 0.0
         # return max((10000 - cur_iter) / 10000, 0.0)  # 0 -> 1, 1000 -> 0
 
-    def _vq_initialize(self, vq):  # TODO vq initialize
+    def _vq_initialize(self):  # TODO vq initialize
         initial_type = self.opt["initialize"].lower()
         if initial_type == "svd":
             pass
         elif initial_type == "tsp":
             pass
         elif initial_type == "uni":
-            nn.init.xavier_uniform_(vq)
+            nn.init.xavier_uniform_(self.vq)
         elif initial_type == "normal":
-            nn.init.xavier_normal_(vq)
-            # nn.init.normal_(vq, std=0.1)
+            nn.init.xavier_normal_(self.vq)
         else:
             raise ValueError(f"Unsupported vq initial type {initial_type}.")
 
-    def _vector_quantize(self, feat: torch.Tensor, codebook: torch.Tensor, cur_iter) -> Tuple[
-        torch.Tensor, torch.Tensor, torch.Tensor]:
+    def _vector_quantize(self, feat: torch.Tensor, codebook: torch.Tensor, cur_iter: int) -> Tuple[
+        torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         :param feat:            (batch_size, ch, h, w)
         :param codebook:        (K, ch)
@@ -132,13 +141,14 @@ class HOI(nn.Module):
         encodings.scatter_(1, encoding_indices, 1)  # label one-hot vector
 
         if self.opt["is_weight_sum"]:
-            p = F.softmax(-distance, dim=1)
+            p = F.softmax(-distance / self._get_temperature(cur_iter), dim=1)
             q_feat = torch.matmul(p, code)  # (bhw, K) x (K, c) = (bhw, c)
             q_feat = q_feat.view(b, h, w, -1)  # (b, h, w, c)
 
         else:  # TODO top1
             q_feat = torch.matmul(encodings, code)
             q_feat = q_feat.view(b, h, w, -1)  # (b, h, w, c)
+
             # TODO -> vq_loss explode
             q_feat = feat + (q_feat - feat).detach()
 
@@ -152,50 +162,23 @@ class HOI(nn.Module):
             self.vq0_update += cur_update
             # TODO restart
 
-        return q_feat, assignment, distance
-
-    def _Augmentation(self, x: torch.Tensor):
-        # Augmentation = nn.Sequential(
-        #     # TODO flip ok?
-        #     # Kg.RandomHorizontalFlip(p=0.5),
-        #     Kg.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.1, p=0.8),
-        #     Kg.RandomGrayscale(p=0.2),
-        #     # TODO add gaussian blur?
-        #     # Kg.RandomGaussianBlur((int(0.1 * x.shape[1]), int(0.1 * x.shape[2])), (0.1, 2.0), p=0.5)
-        # )
-
-        Augmentation = transforms.Compose([
-            transforms.ColorJitter(brightness=.3, contrast=.3, saturation=.3, hue=.1),
-            transforms.RandomGrayscale(.2),
-            transforms.RandomApply([transforms.GaussianBlur((5, 5))])
-        ])
-
-        return Augmentation(x)
+        return feat, q_feat, assignment, distance
 
     def forward(self, x: torch.Tensor, cur_iter, is_pos: bool = False):
-        if is_pos:  # model_pos_output
-            feat, head = self.extractor(x)
-            return feat, head
+        feat, x = self.extractor(x)  # Backbone (b, 384, h, w) -> Head : (b, d, h, w),
+        if is_pos:
+            return x, feat
 
+        head, qx, assignment, distance = self._vector_quantize(x, self.vq,
+                                                               cur_iter)  # (b, d, h, w), (b, K, h, w), (-1, K)
         if self.training:
-            I1 = self._Augmentation(x)
-            I2 = self._Augmentation(x)
-
-            feat1, x1 = self.extractor(I1)  # (32, 384, 28, 28)
-            qx1, assignment1, distance1 = self._vector_quantize(x1, self.vq, cur_iter)  # (32, 384, 28, 28)
-
-            feat2, x2 = self.extractor(I2)  # (32, 384, 28, 28)
-            qx2, assignment2, distance2 = self._vector_quantize(x2, self.vq, cur_iter)  # (32, 384, 28, 28)
-
+            recon = self.decoder(qx)
             if cur_iter % 25 == 0:
-                print("vq", torch.topk(self.vq0_update, 20).values,
-                      torch.topk(self.vq0_update, 20, largest=False).values)
-            return [x1, x2], [qx1, qx2], [assignment1, assignment2], [distance1, distance2], 0, [feat1, feat2]
+                print("vq", torch.topk(self.vq0_update, 40).values,
+                      torch.topk(self.vq0_update, 40, largest=False).values)
+            return x, qx, assignment, distance, recon, feat
         else:
-            feat, x = self.extractor(x)
-            qx, assignment, distance = self._vector_quantize(x, self.vq, cur_iter)
-
-            return x, qx, assignment, distance
+            return x, qx
 
     @classmethod
     def build(cls, opt, n_classes, device):
@@ -213,3 +196,60 @@ class HOI(nn.Module):
         for p in self.parameters():
             count += p.numel()
         return count
+
+
+class BOB_decoder(nn.Module):
+    # opt["decoder"]
+    def __init__(self,
+                 opt,
+                 in_channel: int,
+                 out_channel: int
+                 ):
+        super().__init__()
+        self.opt = opt
+        n_res_block = self.opt["n_res_block"]
+        n_res_channel = self.opt["n_res_channel"]
+        channel = self.opt["channel"]
+        self.prenorm = self.opt["prenorm"]
+
+        blocks = [nn.Conv2d(in_channel, channel, 3, padding=1)]
+
+        for i in range(n_res_block):
+            blocks.append(ResBlock(channel, n_res_channel))
+
+        # TODO layernorm dimensin right?
+        self.norm = nn.LayerNorm(out_channel, eps=1e-6)
+        self.final = nn.Conv2d(channel, out_channel, 1)
+        self.blocks = nn.Sequential(*blocks)
+
+    def forward(self, qx: torch.Tensor) -> torch.Tensor:
+        # qx : (b, d, h, w)
+        self.shape = qx.shape
+        x = self.blocks(qx)
+
+        if self.prenorm:
+            x = self.norm(x)
+            x = self.final(x)
+        else:
+            x = self.final(x)  # (b, c, h, w)
+            x = self.norm(x.permute(0, 2, 3, 1))  # (b, h, w, c)
+            x = x.permute(0, 3, 1, 2)  # (b, c, h, w)
+        return x
+
+
+class ResBlock(nn.Module):
+    def __init__(self, in_channel, channel):
+        super().__init__()
+
+        self.conv = nn.Sequential(
+            nn.ReLU(),
+            nn.Conv2d(in_channel, channel, 3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(channel, in_channel, 3, padding=1),
+        )
+
+    def forward(self, input):
+        out = self.conv(input)
+        out += input
+
+        return out

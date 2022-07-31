@@ -1,12 +1,12 @@
 {
     "gpu_ids": [0],
     "output_dir": "./output/",
-    "checkpoint": "",
+    "checkpoint": null,
     "wandb": {
         "project": "Jigmentation",
         "entity": "00310214aa-",
-        "name": "HOI_64_patch_vq",
-        "memo": "HOI_64_patch_vq",
+        "name": "HOI_1024_dino",
+        "memo": "HOI_1024_dinotrainable_patch_vq_kmeans",
         "mode": "online"
     },
     "dataset": {
@@ -32,6 +32,7 @@
         "bn_eps": null,
         "pretrained": {
             "name": "dino",
+            "trainable" : true,
             "model_type": "vit_small",
             "dino_patch_size": 8,
             "dino_feat_type": "feat",
@@ -39,30 +40,45 @@
             "projection_type": "nonlinear",
             "dropout": true
         },
-        "K": 64,
+        "K": 1024,
         "initialize": "uni",
         "initial": "kmeans",
-        "temperature": 0.5
+        "normalize": false,
+        "temperature": 0.5,
+        "is_weight_sum": true
     },
     "loss": {
         "name": "HOI",
-        "is_weight_sum": true,
         "vq_weight": 0.0,
         "vq_loss": {
-            "e_weight": 0.0,
-            "q_weight" : 0.0,
+            "e_weight": 0.25,
+            "q_weight": 1.0,
             "manage_weight": 0.0,
             "intra_weight": 0.0,
             "inter_weight": 0.0
         },
         "cross_weight": 1.0,
-        "cross_loss" : {
-            "temperature" : 0.5
+        "cross_loss": {
+            "temperature": 0.5
+        },
+        "corr_weight": 0.0,
+        "corr_loss": {
+            "neg_inter_weight": 0.63,
+            "pos_inter_weight": 0.25,
+            "pos_intra_weight": 0.67,
+            "neg_inter_shift": 0.66,
+            "pos_inter_shift": 0.02,
+            "pos_intra_shift": 0.08,
+            "zero_clamp": true,
+            "pointwise": true,
+            "stabilize": false,
+            "feature_samples": 11,
+            "neg_samples": 5
         }
     },
     "optimizer": {
         "net": {
-            "name": "adam",
+            "name": "adamw",
             "lr": 3e-4,
             "weight_decay": 10e-6
         },
@@ -73,15 +89,16 @@
         "linear": {
             "name": "adam",
             "lr": 3e-3
-        }
+        },
+        "vq_optim_weight": 1.0
     },
     "scheduler": {
-        "name" : "cos"
+        "name": "cos"
     },
     "train": {
         "print_freq": 25,
         "valid_freq": 100,
-        "epoch": 1,
+        "epoch": 5000,
         "freeze_encoder_bn": false,
         "freeze_all_bn": 1,
         "num_accum": 1,
@@ -95,6 +112,6 @@
         "is_direct": false,
         "is_diff": false,
         "linear_sep": false,
-        "output" : "vq"
+        "output": "head"
     }
 }

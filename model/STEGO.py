@@ -5,16 +5,16 @@ import torch.nn.functional as F  # noqa
 from model.dino.DinoFeaturizer import DinoFeaturizer
 from utils.layer_utils import ClusterLookup
 
+
 class STEGOmodel(nn.Module):
     # opt["model"]
     def __init__(self,
                  opt: dict,
-                 n_classes:int
+                 n_classes: int
                  ):
         super().__init__()
         self.opt = opt
-        self.n_classes= n_classes
-
+        self.n_classes = n_classes
 
         if not opt["continuous"]:
             dim = n_classes
@@ -29,16 +29,15 @@ class STEGOmodel(nn.Module):
         self.cluster_probe = ClusterLookup(dim, n_classes + opt["extra_clusters"])
         self.linear_probe = nn.Conv2d(dim, n_classes, (1, 1))
 
-
-    def forward(self, x: torch.Tensor, cur_iter:int):
+    def forward(self, x: torch.Tensor, cur_iter: int):
         return self.net(x)
 
     @classmethod
     def build(cls, opt, n_classes):
         # opt = opt["model"]
         m = cls(
-            opt = opt,
-            n_classes= n_classes
+            opt=opt,
+            n_classes=n_classes
         )
         print(f"Model built! #params {m.count_params()}")
         return m
@@ -55,4 +54,3 @@ if __name__ == '__main__':
     dummy_input = torch.empty(2, 3, 352, 1216)
     dummy_output = net(dummy_input)[0]
     print(dummy_output.shape)  # (2, 1, 88, 304)
-

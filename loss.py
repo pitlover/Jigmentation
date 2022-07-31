@@ -24,7 +24,51 @@ def super_perm(size: int, device: torch.device):
     return perm % size
 
 
-class HoiLoss(nn.Module):
+class JiranoLoss(nn.Module):
+    def __init__(self,
+                 n_classes: int,
+                 cfg: Dict):
+        super().__init__()
+        self.opt = cfg
+        self.n_classes = n_classes
+
+        self.vq_weight = self.opt["vq_weight"]
+        self.corr_weight = self.opt["corr_weight"]
+        self.corr_loss = ContrastiveCorrelationLoss(cfg["corr_weight"])
+
+        self.vq_loss = VQLoss(cfg["vq_loss"])
+        self.linear_loss = LinearLoss(cfg)
+
+    def forward(self, model_input: Tuple,
+                model_output: Tuple,
+                model_pos_output: Tuple,
+                linear_output: torch.Tensor = None,
+                cluster_output: torch.Tensor = None):
+        loss, loss_dict, vq_dict = 0, {}, {}
+        head, qx, assignment, distance, recon, feat = model_output
+
+        if self.vq_weight > 0:
+            vq_loss, vq_dict = self.vq_loss(model_output)
+            loss += self.vq_weight * vq_loss
+            loss_dict["vq"] = vq_loss.item()
+
+        if self.corr_weight > 0:
+            feats_pos, code_pos = model_pos_output
+            corr_loss, corr_loss_dict = self.corr_loss(feat, feats_pos, head, code_pos)
+            loss += self.corr_weight * corr_loss
+            loss_dict["corr"] = corr_loss.item()
+
+        linear_loss = self.linear_loss(linear_output, model_input[1], self.n_classes)
+        cluster_loss = cluster_output[0]
+
+        loss += (linear_loss + cluster_loss)
+        loss_dict["loss"], loss_dict["linear"], loss_dict[
+            "cluster"] = loss.item(), linear_loss.item(), cluster_loss.item()
+
+        return loss, loss_dict, vq_dict, corr_loss_dict
+
+
+class BobLoss(nn.Module):
     def __init__(self,
                  n_classes: int,
                  batch_size: int,
@@ -35,9 +79,13 @@ class HoiLoss(nn.Module):
 
         self.vq_weight = self.opt["vq_weight"]
         self.cross_weight = self.opt["cross_weight"]
+        self.recon_weight = self.opt["recon_weight"]
+        self.corr_weight = self.opt["corr_weight"]
+        self.corr_loss = ContrastiveCorrelationLoss(cfg["corr_weight"])
 
         self.vq_loss = VQLoss(cfg["vq_loss"])
         self.cross_loss = CrossLoss(cfg["cross_loss"], batch_size)
+        self.recon_loss = ReconLoss(cfg["recon_loss"])  # TODO Recon Loss
 
         self.linear_loss = LinearLoss(cfg)
 
@@ -47,6 +95,7 @@ class HoiLoss(nn.Module):
                 linear_output: torch.Tensor = None,
                 cluster_output: torch.Tensor = None):
         loss, loss_dict, vq_dict = 0, {}, {}
+        head, qx, assignment, distance, recon, feat = model_output
 
         if self.vq_weight > 0:
             vq_loss, vq_dict = self.vq_loss(model_output)
@@ -58,13 +107,100 @@ class HoiLoss(nn.Module):
             loss += self.cross_weight * cross_loss
             loss_dict["cross"] = cross_loss.item()
 
+        if self.recon_weight > 0:
+            recon_loss = self.recon_loss(model_output)
+            loss += self.recon_weight * recon_loss
+            loss_dict["recon"] = recon_loss.item()
+
+        if self.corr_weight > 0:
+            feats_pos, code_pos = model_pos_output
+            corr_loss, corr_loss_dict = self.corr_loss(feat, feats_pos, head, code_pos)
+            loss += self.corr_weight * corr_loss
+            loss_dict["corr"] = corr_loss.item()
+
         linear_loss = self.linear_loss(linear_output, model_input[1], self.n_classes)
         cluster_loss = cluster_output[0]
+
+        loss += (linear_loss + cluster_loss)
 
         loss_dict["loss"], loss_dict["linear"], loss_dict[
             "cluster"] = loss.item(), linear_loss.item(), cluster_loss.item()
 
-        return loss, loss_dict, vq_dict
+        return loss, loss_dict, vq_dict, corr_loss_dict
+
+
+class ReconLoss(nn.Module):
+    def __init__(self,
+                 cfg: Dict
+                 ):
+        super().__init__()
+        self.opt = cfg
+        self.mse = nn.MSELoss()
+
+    def forward(self,
+                model_output: Tuple
+                ):
+        x, qx, assignment, distance, recon, feat = model_output
+        mse_loss = self.mse(recon, feat)
+
+        return mse_loss
+
+
+class HoiLoss(nn.Module):
+    def __init__(self,
+                 n_classes: int,
+                 batch_size: int,
+                 cfg: Dict):
+        super().__init__()
+        self.opt = cfg
+        self.n_classes = n_classes
+
+        self.vq_weight = self.opt["vq_weight"]
+        self.cross_weight = self.opt["cross_weight"]
+        self.corr_weight = self.opt["corr_weight"]
+
+        self.vq_loss = VQLoss(cfg["vq_loss"])
+        self.cross_loss = CrossLoss(cfg["cross_loss"], batch_size)
+        self.corr_loss = ContrastiveCorrelationLoss(cfg["corr_loss"])
+
+        self.linear_loss = LinearLoss(cfg)
+
+    def forward(self, model_input: Tuple,
+                model_output: Tuple,
+                model_pos_output: Tuple,
+                linear_output: torch.Tensor = None,
+                cluster_output: torch.Tensor = None):
+        loss, loss_dict, vq_dict = 0, {}, {}
+        head, qx, assignment, distance, recon, feat = model_output
+
+        if self.vq_weight > 0:
+            vq_loss, vq_dict = self.vq_loss(model_output)
+            loss += self.vq_weight * vq_loss
+            loss_dict["vq"] = vq_loss.item()
+
+        if self.cross_weight > 0:
+            cross_loss = self.cross_loss(model_output, model_input)
+            loss += self.cross_weight * cross_loss
+            loss_dict["cross"] = cross_loss.item()
+
+        if self.corr_weight > 0:
+            feats_pos, head_pos = model_pos_output
+            corr_loss, corr_loss_dict = self.corr_loss(feat[0], feats_pos, head[0], head_pos)
+            loss += self.corr_weight * corr_loss
+            loss_dict["corr"] = corr_loss.item()
+
+        linear_loss = self.linear_loss(linear_output, model_input[1], self.n_classes)
+        cluster_loss = cluster_output[0]
+
+        loss += (linear_loss + cluster_loss)
+
+        loss_dict["loss"], loss_dict["linear"], loss_dict[
+            "cluster"] = loss.item(), linear_loss.item(), cluster_loss.item()
+
+        if self.corr_weight > 0:
+            return loss, loss_dict, vq_dict, corr_loss_dict
+        else:
+            return loss, loss_dict, vq_dict, None
 
 
 class CrossLoss(nn.Module):
@@ -79,16 +215,9 @@ class CrossLoss(nn.Module):
         self.get_corr_mask = self._get_correlated_mask().type(torch.bool)
 
     def _get_correlated_mask(self):
-        # diag = np.eye(2 * self.batch_size)
-        # l1 = np.eye((2 * self.batch_size), 2 * self.batch_size, k=-self.batch_size)
-        # l2 = np.eye((2 * self.batch_size), 2 * self.batch_size, k=self.batch_size)
-        # mask = torch.from_numpy((diag + l1 + l2))
-        # mask = (1 - mask).type(torch.bool)
-        # return mask.cuda()
-
-        diag = np.eye(2 * self.batch_size * 70)
-        l1 = np.eye((2 * self.batch_size * 70), 2 * self.batch_size * 70, k=-self.batch_size * 70)
-        l2 = np.eye((2 * self.batch_size * 70), 2 * self.batch_size * 70, k=self.batch_size * 70)
+        diag = np.eye(2 * self.batch_size)
+        l1 = np.eye((2 * self.batch_size), 2 * self.batch_size, k=-self.batch_size)
+        l2 = np.eye((2 * self.batch_size), 2 * self.batch_size, k=self.batch_size)
         mask = torch.from_numpy((diag + l1 + l2))
         mask = (1 - mask).type(torch.bool)
         return mask.cuda()
@@ -184,7 +313,8 @@ class CrossLoss(nn.Module):
         # labels = torch.zeros(2 * self.batch_size * d).to(head[0].device).long()
         # cross_loss = self.ce(logits_12, labels) + self.ce(logits_21, labels)
         # -------------------------------------------------------------------------------------------------- #
-        head, quantized, assignment, distance = model_output  # [x1, x2], [qx1, qx2], [ass1, ass2], [dis1, dis2]
+        # HOI + stego
+        head, quantized, assignment, distance, recon, feat = model_output  # [x1, x2], [qx1, qx2], [ass1, ass2], [dis1, dis2]
         # head (b, d, h, w)
         b, d, h, w = head[0].shape
 
@@ -256,44 +386,42 @@ class VQLoss(nn.Module):
         self.opt = cfg
         self.manage_weight = self.opt["manage_weight"]
 
-    def forward(self, model_output: Tuple):
-        head, quantized, assignment, distance = model_output  # [x1, x2], [qx1, qx2], [ass1, ass2], [dis1, dis2]
+    def forward(self, model_output):
+        loss = 0
         vq_dict = {}
-        q_list, e_list, inter_list, loss = [], [], [], 0
+        head, quantized, assignment, distance, recon, feat = model_output
+        head = head.permute(0, 2, 3, 1).contiguous()
+        quantized = quantized.permute(0, 2, 3, 1).contiguous()
+        # head = head[0].permute(0, 2, 3, 1).contiguous()
+        # quantized = quantized[0].permute(0, 2, 3, 1).contiguous()
+        # print("vq head", head[0])
+        # print("vq quantized", quantized[0])
+        # print("vq", head.shape, quantized.shape) # (b, h, w, c)
 
-        for a in range(len(head)):
-            # ch = head[a].shape[1]
-            q_loss = F.mse_loss(head[a].detach(), quantized[a])
-            e_loss = F.mse_loss(quantized[a], head[a].detach())
-            q_list.append(q_loss)
-            e_list.append(e_loss)
+        q_loss = F.mse_loss(head.detach(), quantized)
+        e_loss = F.mse_loss(quantized, head.detach())
 
-            # manageloss
-            if self.manage_weight > 0.0:
-                p = F.softmax(distance[a], dim=1)
-                entropy = -p * torch.log(p + 1e-8)
-                entropy = torch.sum(entropy, dim=-1)  # (25088,)
-                intra_loss = entropy.mean()  # minimization
+        # manageloss
+        if self.manage_weight > 0.0:
+            p = F.softmax(distance, dim=1)
+            entropy = -p * torch.log(p + 1e-8)
+            entropy = torch.sum(entropy, dim=-1)  # (25088,)
+            intra_loss = entropy.mean()  # minimization
 
-                avg_p = p.mean(0)
-                avg_entropy = -avg_p * torch.log(avg_p + 1e-8)
-                avg_entropy = torch.sum(avg_entropy, dim=-1)
-                inter_loss = -avg_entropy  # maximization
-                inter_list.append(inter_loss)
+            avg_p = p.mean(0)
+            avg_entropy = -avg_p * torch.log(avg_p + 1e-8)
+            avg_entropy = torch.sum(avg_entropy, dim=-1)
+            inter_loss = -avg_entropy  # maximization
 
-                if self.opt["intra_weight"] > 0.0:
-                    vq_dict[f"[{a}]intra"] = intra_loss
-                if self.opt["inter_weight"] > 0.0:
-                    vq_dict[f"[{a}]inter"] = inter_loss
+            if self.opt["intra_weight"] > 0.0:
+                vq_dict[f"intra"] = intra_loss
+            if self.opt["inter_weight"] > 0.0:
+                vq_dict[f"inter"] = inter_loss
 
-                loss += (self.opt["intra_weight"] * intra_loss + self.opt["inter_weight"] * inter_loss)
+            loss += (self.opt["intra_weight"] * intra_loss + self.opt["inter_weight"] * inter_loss)
 
-            loss += (self.opt["q_weight"] * q_loss + self.opt["e_weight"] * e_loss)
-
-            vq_dict[f"[{a}]e_loss"] = e_loss
-            vq_dict[f"[{a}]q_loss"] = q_loss
-
-        vq_dict.update({"e_vq": sum(e_list), "q_vq": sum(q_list), "loss": loss})
+        loss += (self.opt["q_weight"] * q_loss + self.opt["e_weight"] * e_loss)
+        vq_dict.update({"e_vq": e_loss, "q_vq": q_loss, "loss": loss})
 
         return loss, vq_dict
 
@@ -330,16 +458,6 @@ class DulliLoss(nn.Module):
             inter_loss = -avg_entropy
             inter_list.append(inter_loss)
 
-            # TODO need to fix
-            # if a == 1:
-            #     sub_loss = ( (q_loss + self.opt["e_weight"] * e_loss) + self.opt["inter_weight"] * inter_loss)
-            #     loss += sub_loss
-            # else:
-            #     sub_loss = (q_loss + self.opt["e_weight"] * e_loss + self.opt["inter_weight"] * inter_loss)
-            #     loss += sub_loss
-            # loss += (q_loss + self.opt["e_weight"] * e_loss + self.opt["intra_weight"] * intra_loss + self.opt["inter_weight"] * inter_loss)
-            # loss += (q_loss + self.opt["e_weight"] * e_loss + self.opt["inter_weight"] * inter_loss)  # SWaV style
-            # loss += (q_loss + self.opt["e_weight"] * e_loss + self.opt["intra_weight"] * intra_loss)  # my intuition
             loss += (q_loss + self.opt["e_weight"] * e_loss)
 
             loss_dict[f"[{a}]e_loss"] = e_loss
@@ -356,18 +474,17 @@ class StegoLoss(nn.Module):
 
     def __init__(self,
                  n_classes: int,
-                 cfg: dict,
-                 corr_weight: float = 1.0):
+                 cfg: dict):
         super().__init__()
 
         self.n_classes = n_classes
-        self.corr_weight = corr_weight
-        self.corr_loss = ContrastiveCorrelationLoss(cfg)
+        self.corr_weight = cfg["corr_weight"]
+        self.corr_loss = ContrastiveCorrelationLoss(cfg["corr_weight"])
         self.linear_loss = LinearLoss(cfg)
 
     def forward(self, model_input, model_output, model_pos_output=None, linear_output: torch.Tensor() = None,
                 cluster_output: torch.Tensor() = None) \
-            -> Tuple[torch.Tensor, Dict[str, float]]:
+            -> Tuple[torch.Tensor, Dict[str, float], None, Dict[str, float]]:
         img, label = model_input
         feats, code = model_output
 
@@ -384,7 +501,7 @@ class StegoLoss(nn.Module):
         loss_dict = {"loss": loss.item(), "corr": corr_loss.item(), "linear": linear_loss.item(),
                      "cluster": cluster_loss.item()}
 
-        return loss, loss_dict, corr_loss_dict
+        return loss, loss_dict, None, corr_loss_dict
 
 
 class ContrastiveCorrelationLoss(nn.Module):
@@ -429,6 +546,12 @@ class ContrastiveCorrelationLoss(nn.Module):
                 orig_code_pos: torch.Tensor,
                 ):
 
+        # print("corr feat", orig_feats[0])
+        # print("corr head", orig_code[0])
+        # print("corr_posfeat", orig_feats_pos[0])
+        # print("corr_pos head", orig_code_pos[0])
+        # print("corr", orig_feats.shape, orig_code.shape)
+
         coord_shape = [orig_feats.shape[0], self.cfg["feature_samples"], self.cfg["feature_samples"], 2]
 
         coords1 = torch.rand(coord_shape, device=orig_feats.device) * 2 - 1
@@ -441,9 +564,9 @@ class ContrastiveCorrelationLoss(nn.Module):
         code_pos = sample(orig_code_pos, coords2)
 
         pos_intra_loss, pos_intra_cd = self.helper(
-            feats, feats, code, code, self.cfg["corr_loss"]["pos_intra_shift"])
+            feats, feats, code, code, self.cfg["pos_intra_shift"])
         pos_inter_loss, pos_inter_cd = self.helper(
-            feats, feats_pos, code, code_pos, self.cfg["corr_loss"]["pos_inter_shift"])
+            feats, feats_pos, code, code_pos, self.cfg["pos_inter_shift"])
 
         neg_losses = []
         neg_cds = []
@@ -452,16 +575,16 @@ class ContrastiveCorrelationLoss(nn.Module):
             feats_neg = sample(orig_feats[perm_neg], coords2)
             code_neg = sample(orig_code[perm_neg], coords2)
             neg_inter_loss, neg_inter_cd = self.helper(
-                feats, feats_neg, code, code_neg, self.cfg["corr_loss"]["neg_inter_shift"])
+                feats, feats_neg, code, code_neg, self.cfg["neg_inter_shift"])
             neg_losses.append(neg_inter_loss)
             neg_cds.append(neg_inter_cd)
 
         neg_inter_loss = torch.cat(neg_losses, axis=0)
         neg_inter_cd = torch.cat(neg_cds, axis=0)
 
-        return (self.cfg["corr_loss"]["pos_intra_weight"] * pos_intra_loss.mean() +
-                self.cfg["corr_loss"]["pos_inter_weight"] * pos_inter_loss.mean() +
-                self.cfg["corr_loss"]["neg_inter_weight"] * neg_inter_loss.mean(),
+        return (self.cfg["pos_intra_weight"] * pos_intra_loss.mean() +
+                self.cfg["pos_inter_weight"] * pos_inter_loss.mean() +
+                self.cfg["neg_inter_weight"] * neg_inter_loss.mean(),
                 {"self_loss": pos_intra_loss.mean().item(),
                  "knn_loss": pos_inter_loss.mean().item(),
                  "rand_loss": neg_inter_loss.mean().item()}
@@ -478,7 +601,6 @@ class LinearLoss(nn.Module):
     def forward(self, linear_logits: torch.Tensor, label: torch.Tensor, n_classes: int):
         flat_label = label.reshape(-1)
         mask = (flat_label >= 0) & (flat_label < n_classes)
-
         linear_logits = F.interpolate(linear_logits, label.shape[-2:], mode='bilinear', align_corners=False)
         linear_logits = linear_logits.permute(0, 2, 3, 1).reshape(-1, n_classes)
         linear_loss = self.linear_loss(linear_logits[mask], flat_label[mask]).mean()

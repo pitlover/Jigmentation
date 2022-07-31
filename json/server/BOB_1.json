@@ -1,12 +1,12 @@
 {
-    "gpu_ids": [3],
+    "gpu_ids": [1],
     "output_dir": "./output/",
     "checkpoint": "",
     "wandb": {
         "project": "Jigmentation",
         "entity": "00310214aa-",
-        "name": "JIRANO_3_70_1024_weightsumstego_vq_1_1",
-        "memo": "weightsum_st:vq:intra:inter=1:1:1:1",
+        "name": "BOB1+stego_reconhuge_kmeans",
+        "memo": "BOB_recon_stego_weigtsum_vq",
         "mode": "online"
     },
     "dataset": {
@@ -23,9 +23,10 @@
         "num_workers": 8
     },
     "model": {
-        "name": "JIRANO",
+        "name": "BOB",
         "arch": "dino",
         "continuous": true,
+        "num_feats": 384,
         "dim": 70,
         "extra_clusters": 0,
         "bn_momentum": null,
@@ -38,66 +39,79 @@
             "pretrained_weights": null,
             "projection_type": "nonlinear",
             "dropout": true
+        },
+        "K": 1024,
+        "initialize": "normal",
+        "initial": "kmeans",
+        "normalize": false,
+        "restart": false,
+        "threshold": 0.0001,
+        "is_weight_sum": true,
+        "temperature": 0.5,
+        "decoder": {
+            "channel": 128,
+            "n_res_channel": 128,
+            "n_res_block": 4,
+            "prenorm": false
         }
     },
     "loss": {
-        "name": "jirano",
-        "zero_clamp": true,
-        "pointwise": true,
-        "stabilize": false,
-        "feature_samples": 11,
-        "neg_samples": 5,
-        "correspondence_weight": 1.0,
+        "name": "BOB",
+        "vq_weight": 1.0,
+        "vq_loss": {
+            "e_weight": 0.25,
+            "q_weight": 1.0,
+            "manage_weight": 0.0,
+            "intra_weight": 0.0,
+            "inter_weight": 0.0
+        },
+        "cross_weight": 0.0,
+        "cross_loss": {
+            "temperature": 0.5
+        },
+        "recon_weight": 1.0,
+        "recon_loss": {
+        },
+        "corr_weight": 1.0,
         "corr_loss": {
             "neg_inter_weight": 0.63,
             "pos_inter_weight": 0.25,
             "pos_intra_weight": 0.67,
             "neg_inter_shift": 0.66,
             "pos_inter_shift": 0.02,
-            "pos_intra_shift": 0.08
-        },
-        "vectorquantize_weight": 1.0,
-        "vq_loss": {
-            "e_weight": 0.25,
-            "K": 512,
-            "max_decay_momentum": 0.99,
-            "min_decay_momentum": 0.01,
-            "is_momentum_type": null,
-            "steps" : 0,
-            "manage_weight" : 1.0,
-            "intra_weight" : 1.0,
-            "inter_weight" : 1.0,
-            "is_weight_sum" : true,
-            "topK_weight_sum": 0
+            "pos_intra_shift": 0.08,
+            "zero_clamp": true,
+            "pointwise": true,
+            "stabilize": false,
+            "feature_samples": 11,
+            "neg_samples": 5
         }
     },
     "optimizer": {
         "net": {
             "name": "adamw",
-            "lr": 5e-4,
+            "lr": 3e-4,
             "weight_decay": 2.0
-        },
-        "linear": {
-            "name": "adam",
-            "lr": 5e-3
         },
         "cluster": {
             "name": "adam",
-            "lr": 5e-3
+            "lr": 3e-3
         },
-        "vq": {
+        "linear": {
             "name": "adam",
-            "lr": 5e-3
-        }
+            "lr": 3e-3
+        },
+        "vq_optim_weight": 10
     },
     "scheduler": {
+        "name": "cos"
     },
     "train": {
         "print_freq": 25,
         "valid_freq": 100,
         "epoch": 1,
         "freeze_encoder_bn": false,
-        "freeze_all_bn": -1,
+        "freeze_all_bn": 1,
         "num_accum": 1,
         "grad_norm": 10.0
     },
@@ -107,7 +121,8 @@
         "is_crf": true,
         "is_visualize": false,
         "is_direct": false,
-        "is_diff" : false,
-        "linear_sep" : false
+        "is_diff": false,
+        "linear_sep": false,
+        "output": "vq"
     }
 }
