@@ -1,12 +1,12 @@
 {
-    "gpu_ids": [0],
+    "gpu_ids": [0, 1, 2, 3],
     "output_dir": "./output/",
     "checkpoint": null,
     "wandb": {
         "project": "Jigmentation",
         "entity": "00310214aa-",
-        "name": "HOI_1024_dino",
-        "memo": "HOI_1024_dinotrainable_patch_spqversion_kmeans",
+        "name": "HOI_1024_res18",
+        "memo": "HOI_1024_res18_trainable_patch_spqversion_kmeans",
         "mode": "online"
     },
     "dataset": {
@@ -24,27 +24,24 @@
     },
     "model": {
         "name": "HOI",
-        "arch": "dino",
+        "arch": "resnet18",
         "continuous": true,
-        "dim": 70,
+        "dim": 128,
         "extra_clusters": 0,
         "bn_momentum": null,
         "bn_eps": null,
         "pretrained": {
-            "name": "dino",
-            "trainable" : true,
-            "model_type": "vit_small",
-            "dino_patch_size": 8,
-            "dino_feat_type": "feat",
+            "model_type": "resnet18",
+            "trainable": true,
             "pretrained_weights": null,
             "projection_type": "nonlinear",
             "dropout": true
         },
         "K": 1024,
         "initialize": "uni",
-        "initial": "kmeans",
+        "initial": null,
         "normalize": false,
-        "temperature": 0.5,
+        "temperature": 0.2,
         "is_weight_sum": true
     },
     "loss": {
@@ -98,7 +95,7 @@
     "train": {
         "print_freq": 25,
         "valid_freq": 100,
-        "epoch": 1,
+        "epoch": 5000,
         "freeze_encoder_bn": false,
         "freeze_all_bn": 1,
         "num_accum": 1,

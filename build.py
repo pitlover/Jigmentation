@@ -224,8 +224,8 @@ def build_dataset(opt: dict, mode: str = "train", model_type: str = "dino", name
                 cfg=opt,
                 num_neighbors=opt["num_neighbors"],
                 mask=True,
-                pos_images=True,  # HOI + Stego
-                pos_labels=True
+                pos_images=False,  # HOI + Stego
+                pos_labels=False
             )
 
         elif name in ["bob", "stego", "jirano"]:

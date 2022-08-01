@@ -3,32 +3,33 @@ import torch.nn.functional as F
 from model.res import backbone
 
 
-class PanopticFPN(nn.Module):
-    def __init__(self, args):
-        super(PanopticFPN, self).__init__()
-        self.backbone = backbone.__dict__[args.arch](pretrained=args.pretrain)
-        self.decoder  = FPNDecoder(args)
+class Resnet(nn.Module):
+    def __init__(self, opt):
+        super().__init__()
+        self.backbone = backbone.__dict__[opt["arch"]](pretrained=True)
+        self.decoder = FPNDecoder(opt)
 
     def forward(self, x):
         feats = self.backbone(x)
-        outs  = self.decoder(feats) 
+        outs = self.decoder(feats)
 
-        return outs 
+        return outs
+
 
 class FPNDecoder(nn.Module):
-    def __init__(self, args):
-        super(FPNDecoder, self).__init__()
-        if args.arch == 'resnet18':
+    def __init__(self, opt):
+        super().__init__()
+        if opt["arch"] == 'resnet18':
             mfactor = 1
-            out_dim = 128 
+            out_dim = 128
         else:
             mfactor = 4
             out_dim = 256
 
-        self.layer4 = nn.Conv2d(512*mfactor//8, out_dim, kernel_size=1, stride=1, padding=0)
-        self.layer3 = nn.Conv2d(512*mfactor//4, out_dim, kernel_size=1, stride=1, padding=0)
-        self.layer2 = nn.Conv2d(512*mfactor//2, out_dim, kernel_size=1, stride=1, padding=0)
-        self.layer1 = nn.Conv2d(512*mfactor, out_dim, kernel_size=1, stride=1, padding=0)
+        self.layer4 = nn.Conv2d(512 * mfactor // 8, out_dim, kernel_size=1, stride=1, padding=0)
+        self.layer3 = nn.Conv2d(512 * mfactor // 4, out_dim, kernel_size=1, stride=1, padding=0)
+        self.layer2 = nn.Conv2d(512 * mfactor // 2, out_dim, kernel_size=1, stride=1, padding=0)
+        self.layer1 = nn.Conv2d(512 * mfactor, out_dim, kernel_size=1, stride=1, padding=0)
 
     def forward(self, x):
         o1 = self.layer1(x['res5'])
@@ -41,7 +42,4 @@ class FPNDecoder(nn.Module):
     def upsample_add(self, x, y):
         _, _, H, W = y.size()
 
-        return F.interpolate(x, size=(H, W), mode='bilinear', align_corners=False) + y 
-
-
-
+        return F.interpolate(x, size=(H, W), mode='bilinear', align_corners=False) + y

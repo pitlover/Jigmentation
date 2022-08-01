@@ -60,7 +60,7 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
 
     # ------------------------ DataLoader ------------------------------#
     if is_train:
-        train_dataset = build_dataset(opt["dataset"], mode="train", model_type=opt["model"]["pretrained"]["model_type"],
+        train_dataset = build_dataset(opt["dataset"], mode="train", model_type=opt["model"]["name"],
                                       name=opt["model"]["name"].lower())
         train_loader = build_dataloader(train_dataset, opt["dataloader"], shuffle=True)
     else:
@@ -232,7 +232,7 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
                 linear_optimizer.zero_grad(set_to_none=True)
 
             model_input = (img, label)
-            model_output = model(img, cur_iter=current_iter)  # head : (b, 70, 28, 28) quantized : (b, 70, 28, 28)
+            model_output = model(img, cur_iter=current_iter, local_rank=local_rank)  # head : (b, 70, 28, 28) quantized : (b, 70, 28, 28)
             #  x, qx, assignment, distance, recon, feat
 
             # TODO check pos->raw or qutized?
@@ -273,11 +273,6 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
                                                             model_pos_output=model_pos_output if model_pos_output is not None else None,
                                                             linear_output=linear_output,
                                                             cluster_output=cluster_output)
-            # print("detached", detached_code[0])
-            # print("detached", detached_code.shape)
-            # print("linear", linear_output[0])
-            # print("linear", linear_output.shape)
-            # print("#########################")
 
             forward_time = timer.update()
 
