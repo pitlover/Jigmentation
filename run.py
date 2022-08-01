@@ -112,10 +112,11 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
     # ------------------- Optimizer  -----------------------#
     if is_train:
         # TODO split_params right?
-        paramas_for_optimizer = split_params_for_optimizer(model_m, opt["optimizer"])
+        params_for_optimizer = split_params_for_optimizer(model_m, opt["optimizer"])
+
         # paramas_for_optimizer = model_m.parameters()
         optimizer, cluster_optimizer, linear_optimizer = build_optimizer(
-            main_params=paramas_for_optimizer,
+            main_params=params_for_optimizer,
             cluster_params=cluster_model.parameters(),
             linear_params=linear_model.parameters(),
             opt=opt["optimizer"],
@@ -152,9 +153,9 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
     # ------------------- Scheduler -----------------------#
     if is_train:
         num_accum = opt["train"]["num_accum"]
-        scheduler = build_scheduler(opt, optimizer, train_loader, start_epoch)
-        if start_epoch != 0:
-            scheduler.step(start_epoch + 1)
+        # scheduler = build_scheduler(opt, optimizer, train_loader, start_epoch)
+        # if start_epoch != 0:
+        #     scheduler.step(start_epoch + 1)
     else:
         num_accum = 1
         scheduler = None
@@ -232,13 +233,14 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
                 linear_optimizer.zero_grad(set_to_none=True)
 
             model_input = (img, label)
-            model_output = model(img, cur_iter=current_iter, local_rank=local_rank)  # head : (b, 70, 28, 28) quantized : (b, 70, 28, 28)
+            model_output = model(img, cur_iter=current_iter,
+                                 local_rank=local_rank)  # head : (b, 70, 28, 28) quantized : (b, 70, 28, 28)
             #  x, qx, assignment, distance, recon, feat
 
             # TODO check pos->raw or qutized?
             model_pos_output = None
             if opt["loss"]["corr_weight"] > 0.0:
-                if "hoi" in opt["model"]["name"].lower():
+                if "hoi" in opt["model"]["name"].lower() or "jirano" in opt["model"]["name"].lower():
                     model_pos_output = model(img_pos, cur_iter=current_iter, is_pos=True)
                 else:
                     model_pos_output = model(img_pos, cur_iter=current_iter)
@@ -264,10 +266,14 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
             else:
                 raise ValueError(f"Unsupported loss type {out_type}")
 
-            detached_code = torch.clone(out.detach())
+            detached_code = torch.clone(out.detach())  # (b, 128, 56, 56)
+            # print("detached ", detached_code[0])
+            # print(detached_code.shape)
             linear_output = linear_model(detached_code)
-
+            # print("linear", linear_output[0])
+            # print("linear", linear_output.shape)
             cluster_output = cluster_model(detached_code, None)
+
             loss, loss_dict, vq_dict, corr_dict = criterion(model_input=model_input,
                                                             model_output=model_output,
                                                             model_pos_output=model_pos_output if model_pos_output is not None else None,
@@ -279,12 +285,6 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
             loss = loss / num_accum
             loss.backward()
 
-            # for param_name, param in model_m.named_parameters():
-            #     if param.grad is not None:
-            #         print(param_name, torch.sum(param.abs()), torch.sum(param.grad.abs()))
-            #     elif param.requires_grad:  # grad is None but requires grad
-            #         print(param_name, torch.sum(param.abs()), "GRAD is NONE")
-
             if i % num_accum == (num_accum - 1):
                 if freeze_encoder_bn:
                     zero_grad_bn(model_m)
@@ -295,7 +295,7 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
                 optimizer.step()
                 cluster_optimizer.step()
                 linear_optimizer.step()
-                scheduler.step()
+                # scheduler.step()
                 current_iter += 1
 
             backward_time = timer.update()
@@ -339,7 +339,6 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
                         "param_norm": p_norm.item(),
                         "grad_norm": g_norm.item(),
                     })
-
             # --------------------------- Valid --------------------------------#
             if ((i + 1) % valid_freq == 0) or ((i + 1) == len(train_loader)):
                 _ = timer.update()

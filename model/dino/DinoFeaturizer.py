@@ -69,7 +69,8 @@ class DinoFeaturizer(nn.Module):
             torch.nn.Conv2d(in_channels, self.dim, (1, 1)))
 
     def forward(self, img, n=1, return_class_feat=False, cur_iter=0):
-        if self.cfg["trainable"]:
+        self.model.eval()
+        with torch.no_grad():
             assert (img.shape[2] % self.patch_size == 0)
             assert (img.shape[3] % self.patch_size == 0)
 
@@ -91,31 +92,6 @@ class DinoFeaturizer(nn.Module):
 
             if return_class_feat:
                 return feat[:, :1, :].reshape(feat.shape[0], 1, 1, -1).permute(0, 3, 1, 2)
-
-        else:
-            self.model.eval()
-            with torch.no_grad():
-                assert (img.shape[2] % self.patch_size == 0)
-                assert (img.shape[3] % self.patch_size == 0)
-
-                # get selected layer activations
-                feat, attn, qkv = self.model.get_intermediate_feat(img, n=n)
-                feat, attn, qkv = feat[0], attn[0], qkv[0]
-
-                feat_h = img.shape[2] // self.patch_size
-                feat_w = img.shape[3] // self.patch_size
-
-                if self.feat_type == "feat":
-                    image_feat = feat[:, 1:, :].reshape(feat.shape[0], feat_h, feat_w, -1).permute(0, 3, 1, 2)
-                elif self.feat_type == "KK":
-                    image_k = qkv[1, :, :, 1:, :].reshape(feat.shape[0], 6, feat_h, feat_w, -1)
-                    B, H, I, J, D = image_k.shape
-                    image_feat = image_k.permute(0, 1, 4, 2, 3).reshape(B, H * D, I, J)
-                else:
-                    raise ValueError("Unknown feat type:{}".format(self.feat_type))
-
-                if return_class_feat:
-                    return feat[:, :1, :].reshape(feat.shape[0], 1, 1, -1).permute(0, 3, 1, 2)
 
         if self.proj_type is not None:
             code = self.cluster1(self.dropout(image_feat))

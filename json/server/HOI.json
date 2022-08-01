@@ -1,12 +1,12 @@
 {
-    "gpu_ids": [0],
+    "gpu_ids": [0, 1, 2, 3],
     "output_dir": "./output/",
     "checkpoint": null,
     "wandb": {
         "project": "Jigmentation",
         "entity": "00310214aa-",
-        "name": "JIRANO_repro",
-        "memo": "JIRANO_repro",
+        "name": "HOI_1024",
+        "memo": "HOI_1024_patch_spqversion_kmeans",
         "mode": "online"
     },
     "dataset": {
@@ -20,19 +20,19 @@
     },
     "dataloader": {
         "batch_size": 32,
-        "num_workers": 8
+        "num_workers": 0
     },
     "model": {
-        "name": "JIRANO",
+        "name": "HOI",
         "arch": "dino",
         "continuous": true,
         "dim": 70,
-        "trainable" : false,
         "extra_clusters": 0,
         "bn_momentum": null,
         "bn_eps": null,
         "pretrained": {
             "name": "dino",
+            "trainable" : true,
             "model_type": "vit_small",
             "dino_patch_size": 8,
             "dino_feat_type": "feat",
@@ -41,13 +41,27 @@
             "dropout": true
         },
         "K": 1024,
-        "initialize": "normal",
-        "initial" : null,
+        "initialize": "uni",
+        "initial": null,
+        "normalize": false,
+        "temperature": 0.2,
         "is_weight_sum": true
     },
     "loss": {
-        "name": "jirano",
-        "corr_weight": 1.0,
+        "name": "HOI",
+        "vq_weight": 1.0,
+        "vq_loss": {
+            "e_weight": 0.25,
+            "q_weight": 1.0,
+            "manage_weight": 0.0,
+            "intra_weight": 0.0,
+            "inter_weight": 0.0
+        },
+        "cross_weight": 1.0,
+        "cross_loss": {
+            "temperature": 0.5
+        },
+        "corr_weight": 0.0,
         "corr_loss": {
             "neg_inter_weight": 0.63,
             "pos_inter_weight": 0.25,
@@ -60,15 +74,6 @@
             "stabilize": false,
             "feature_samples": 11,
             "neg_samples": 5
-        },
-        "vq_weight": 1.0,
-        "vq_loss": {
-            "q_weight": 1.0,
-            "e_weight": 0.25,
-            "manage_weight": 0.0,
-            "intra_weight": 0.0,
-            "inter_weight": 0.0,
-            "topK_weight_sum": 0
         }
     },
     "optimizer": {
@@ -94,7 +99,7 @@
         "valid_freq": 100,
         "epoch": 1,
         "freeze_encoder_bn": false,
-        "freeze_all_bn": -1,
+        "freeze_all_bn": 1,
         "num_accum": 1,
         "grad_norm": 10.0
     },
@@ -106,6 +111,6 @@
         "is_direct": false,
         "is_diff": false,
         "linear_sep": false,
-        "output": "vq"
+        "output": "head"
     }
 }

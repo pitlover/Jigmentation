@@ -34,7 +34,7 @@ class JiranoLoss(nn.Module):
 
         self.vq_weight = self.opt["vq_weight"]
         self.corr_weight = self.opt["corr_weight"]
-        self.corr_loss = ContrastiveCorrelationLoss(cfg["corr_weight"])
+        self.corr_loss = ContrastiveCorrelationLoss(cfg["corr_loss"])
 
         self.vq_loss = VQLoss(cfg["vq_loss"])
         self.linear_loss = LinearLoss(cfg)
@@ -59,6 +59,7 @@ class JiranoLoss(nn.Module):
             loss_dict["corr"] = corr_loss.item()
 
         linear_loss = self.linear_loss(linear_output, model_input[1], self.n_classes)
+
         cluster_loss = cluster_output[0]
 
         loss += (linear_loss + cluster_loss)
@@ -81,7 +82,7 @@ class BobLoss(nn.Module):
         self.cross_weight = self.opt["cross_weight"]
         self.recon_weight = self.opt["recon_weight"]
         self.corr_weight = self.opt["corr_weight"]
-        self.corr_loss = ContrastiveCorrelationLoss(cfg["corr_weight"])
+        self.corr_loss = ContrastiveCorrelationLoss(cfg["corr_loss"])
 
         self.vq_loss = VQLoss(cfg["vq_loss"])
         self.cross_loss = CrossLoss(cfg["cross_loss"], batch_size)
@@ -174,7 +175,7 @@ class HoiLoss(nn.Module):
         head, qx, assignment, distance, recon, feat = model_output
 
         if self.vq_weight > 0:
-            vq_loss, vq_dict = self.vq_loss(model_output)
+            vq_loss, vq_dict = self.vq_loss(model_output, is_hoi=True)
             loss += self.vq_weight * vq_loss
             loss_dict["vq"] = vq_loss.item()
 
@@ -191,7 +192,6 @@ class HoiLoss(nn.Module):
 
         linear_loss = self.linear_loss(linear_output, model_input[1], self.n_classes)
         cluster_loss = cluster_output[0]
-
         loss += (linear_loss + cluster_loss)
 
         loss_dict["loss"], loss_dict["linear"], loss_dict[
@@ -318,11 +318,11 @@ class CrossLoss(nn.Module):
         # head (b, d, h, w)
         b, d, h, w = head[0].shape
 
-        x1 = head[0].permute(2, 3, 0, 1).reshape(h * w, b, d)
-        x2 = head[1].permute(2, 3, 0, 1).reshape(h * w, b, d)
+        x1 = head[0].permute(2, 3, 0, 1).reshape(h * w, b, d)  # (hw, b, d)
+        x2 = head[1].permute(2, 3, 0, 1).reshape(h * w, b, d)  # (hw, b, d)
 
-        z1 = quantized[0].permute(2, 3, 0, 1).reshape(h * w, b, d)
-        z2 = quantized[1].permute(2, 3, 0, 1).reshape(h * w, b, d)
+        z1 = quantized[0].permute(2, 3, 0, 1).reshape(h * w, b, d)  # (hw, b, d)
+        z2 = quantized[1].permute(2, 3, 0, 1).reshape(h * w, b, d)  # (hw, b, d)
 
         # for each patch, there is 2b samples, that each are d-dimensional vector.
         # for i-th sample (0 <= i < 2b),
@@ -386,20 +386,23 @@ class VQLoss(nn.Module):
         self.opt = cfg
         self.manage_weight = self.opt["manage_weight"]
 
-    def forward(self, model_output):
+    def forward(self, model_output, is_hoi: bool = False):
         loss = 0
         vq_dict = {}
         head, quantized, assignment, distance, recon, feat = model_output
-        head = head.permute(0, 2, 3, 1).contiguous()
-        quantized = quantized.permute(0, 2, 3, 1).contiguous()
-        # head = head[0].permute(0, 2, 3, 1).contiguous()
-        # quantized = quantized[0].permute(0, 2, 3, 1).contiguous()
+
+        if is_hoi:
+            head = head[0].permute(0, 2, 3, 1).contiguous()
+            quantized = quantized[0].permute(0, 2, 3, 1).contiguous()
+        else:
+            head = head.permute(0, 2, 3, 1).contiguous()
+            quantized = quantized.permute(0, 2, 3, 1).contiguous()
+
+        q_loss = F.mse_loss(head.detach(), quantized)
+        e_loss = F.mse_loss(head, quantized.detach())
         # print("vq head", head[0])
         # print("vq quantized", quantized[0])
         # print("vq", head.shape, quantized.shape) # (b, h, w, c)
-
-        q_loss = F.mse_loss(head.detach(), quantized)
-        e_loss = F.mse_loss(quantized, head.detach())
 
         # manageloss
         if self.manage_weight > 0.0:
@@ -479,7 +482,7 @@ class StegoLoss(nn.Module):
 
         self.n_classes = n_classes
         self.corr_weight = cfg["corr_weight"]
-        self.corr_loss = ContrastiveCorrelationLoss(cfg["corr_weight"])
+        self.corr_loss = ContrastiveCorrelationLoss(cfg["corr_loss"])
         self.linear_loss = LinearLoss(cfg)
 
     def forward(self, model_input, model_output, model_pos_output=None, linear_output: torch.Tensor() = None,
@@ -545,13 +548,11 @@ class ContrastiveCorrelationLoss(nn.Module):
                 orig_code: torch.Tensor,
                 orig_code_pos: torch.Tensor,
                 ):
-
         # print("corr feat", orig_feats[0])
         # print("corr head", orig_code[0])
-        # print("corr_posfeat", orig_feats_pos[0])
+        # print("corr_pos feat", orig_feats_pos[0])
         # print("corr_pos head", orig_code_pos[0])
         # print("corr", orig_feats.shape, orig_code.shape)
-
         coord_shape = [orig_feats.shape[0], self.cfg["feature_samples"], self.cfg["feature_samples"], 2]
 
         coords1 = torch.rand(coord_shape, device=orig_feats.device) * 2 - 1
@@ -602,7 +603,11 @@ class LinearLoss(nn.Module):
         flat_label = label.reshape(-1)
         mask = (flat_label >= 0) & (flat_label < n_classes)
         linear_logits = F.interpolate(linear_logits, label.shape[-2:], mode='bilinear', align_corners=False)
-        linear_logits = linear_logits.permute(0, 2, 3, 1).reshape(-1, n_classes)
-        linear_loss = self.linear_loss(linear_logits[mask], flat_label[mask]).mean()
 
+        linear_logits = linear_logits.permute(0, 2, 3, 1).reshape(-1, n_classes)
+
+        linear_loss = self.linear_loss(
+            linear_logits[mask].contiguous(),
+            flat_label[mask].contiguous()
+        ).mean()
         return linear_loss

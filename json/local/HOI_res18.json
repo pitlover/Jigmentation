@@ -20,7 +20,7 @@
     },
     "dataloader": {
         "batch_size": 32,
-        "num_workers": 8
+        "num_workers": 0
     },
     "model": {
         "name": "HOI",

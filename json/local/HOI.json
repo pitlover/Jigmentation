@@ -5,8 +5,8 @@
     "wandb": {
         "project": "Jigmentation",
         "entity": "00310214aa-",
-        "name": "HOI_1024_dino",
-        "memo": "HOI_1024_dinotrainable_patch_spqversion_kmeans",
+        "name": "HOI_1024",
+        "memo": "HOI_1024_patch_spqversion_kmeans",
         "mode": "online"
     },
     "dataset": {
@@ -42,14 +42,14 @@
         },
         "K": 1024,
         "initialize": "uni",
-        "initial": "kmeans",
+        "initial": null,
         "normalize": false,
-        "temperature": 0.5,
+        "temperature": 0.2,
         "is_weight_sum": true
     },
     "loss": {
         "name": "HOI",
-        "vq_weight": 0.0,
+        "vq_weight": 1.0,
         "vq_loss": {
             "e_weight": 0.25,
             "q_weight": 1.0,
@@ -79,21 +79,20 @@
     "optimizer": {
         "net": {
             "name": "adamw",
-            "lr": 3e-4,
-            "weight_decay": 10e-6
-        },
-        "cluster": {
-            "name": "adam",
-            "lr": 3e-3
+            "lr": 5e-4,
+            "weight_decay": 2.0
         },
         "linear": {
             "name": "adam",
-            "lr": 3e-3
+            "lr": 5e-3
         },
-        "vq_optim_weight": 1.0
+        "cluster": {
+            "name": "adam",
+            "lr": 5e-3
+        },
+        "vq_optim_weight" : 10.0
     },
     "scheduler": {
-        "name": "cos"
     },
     "train": {
         "print_freq": 25,

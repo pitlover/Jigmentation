@@ -176,10 +176,9 @@ class HOI(nn.Module):
         return Augmentation(x)
 
     def forward(self, x: torch.Tensor, cur_iter, is_pos: bool = False, local_rank: int = -1):
-        if is_pos:  # model_pos_output
-            feat, head = self.extractor(x)
-            return feat, head
-        # HOI + stego
+        # if is_pos:  # model_pos_output
+        #     feat, head = self.extractor(x)
+        #     return feat, head
         # if self.training:
         #     I1 = self._Augmentation(x)
         #     I2 = self._Augmentation(x)
@@ -204,18 +203,18 @@ class HOI(nn.Module):
             I1 = self._Augmentation(x)
             I2 = self._Augmentation(x)
 
-            x1 = self.extractor(I1)  # (32, 384, 28, 28)
+            feat1, x1 = self.extractor(I1)  # (32, 384, 28, 28)
             qx1, assignment1, distance1 = self._vector_quantize(x1, self.vq, cur_iter)  # (32, 384, 28, 28)
 
-            x2 = self.extractor(I2)  # (32, 384, 28, 28)
+            feat2, x2 = self.extractor(I2)  # (32, 384, 28, 28)
             qx2, assignment2, distance2 = self._vector_quantize(x2, self.vq, cur_iter)  # (32, 384, 28, 28)
 
             if cur_iter % 25 == 0 and local_rank == 0:
                 print("vq", torch.topk(self.vq0_update, 20).values,
                       torch.topk(self.vq0_update, 20, largest=False).values)
-            return [x1, x2], [qx1, qx2], [assignment1, assignment2], [distance1, distance2], None, None
+            return [x1, x2], [qx1, qx2], [assignment1, assignment2], [distance1, distance2], None, [feat1, feat2]
         else:
-            x = self.extractor(x)
+            feat, x = self.extractor(x)
             qx, assignment, distance = self._vector_quantize(x, self.vq, cur_iter)
 
             return x, qx, assignment, distance

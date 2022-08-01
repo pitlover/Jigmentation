@@ -76,6 +76,9 @@ def build_model(opt: dict, n_classes: int = 27, device: torch.device = "cuda"):
             if isinstance(module, (nn.BatchNorm1d, nn.BatchNorm2d, nn.SyncBatchNorm)):
                 module.eps = bn_eps
 
+    # cluster_probe = ClusterLookup(opt["dim"], n_classes + opt["extra_clusters"])
+    # linear_probe = nn.Conv2d(opt["dim"], n_classes, (1, 1))
+
     if model_type in ["dino", "dulli", "hoi", "bob", "stego", "jirano"]:
         return model, model.cluster_probe, model.linear_probe
 
@@ -109,6 +112,8 @@ def split_params_for_optimizer(model, opt):
         param_value: torch.Tensor
         if not param_value.requires_grad:
             continue
+        if ("linear_probe" in param_name) or ("cluster_probe" in param_name):
+            continue
         if "vq" in param_name:
             if (param_value.ndim > 1) and ("position" not in param_name):
                 params_large_lr.append(param_value)
@@ -125,7 +130,7 @@ def split_params_for_optimizer(model, opt):
         {"params": params_base_lr},
         {"params": params_base_lr_no_wd, "weight_decay": 0.0},
         # {"params": params_small_lr, "lr": opt["lr"] * encoder_weight, "weight_decay": opt["weight_decay"] * 0.1},
-        {"params": params_large_lr, "lr": opt["net"]["lr"] * encoder_weight},
+        {"params": params_large_lr, "lr": opt["net"]["lr"] * encoder_weight,  "weight_decay": 0.0},
         {"params": params_large_lr_no_wd, "lr": opt["net"]["lr"] * encoder_weight, "weight_decay": 0.0},
     ]
     return params_for_optimizer
@@ -224,7 +229,7 @@ def build_dataset(opt: dict, mode: str = "train", model_type: str = "dino", name
                 cfg=opt,
                 num_neighbors=opt["num_neighbors"],
                 mask=True,
-                pos_images=False,  # HOI + Stego
+                pos_images=False,
                 pos_labels=False
             )
 
@@ -298,7 +303,7 @@ def build_dataloader(dataset,
             dataset,
             batch_size=max(batch_size, 1),
             shuffle=shuffle,
-            num_workers=opt.get("num_workers", 4),
+            num_workers=opt["num_workers"],
             pin_memory=pin_memory,
             drop_last=shuffle,
         )
@@ -315,8 +320,8 @@ def build_dataloader(dataset,
         return DataLoader(
             dataset,
             batch_size=max(batch_size // world_size, 1),
-            num_workers=(opt.get("num_workers", 4) + world_size - 1) // world_size,
+            num_workers=(opt["num_workers"] + world_size - 1) // world_size,
             pin_memory=pin_memory,
             sampler=ddp_sampler,
-            prefetch_factor=opt.get("prefetch_factor", 1)
+            # prefetch_factor=opt.get("prefetch_factor", 1)
         )

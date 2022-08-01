@@ -75,6 +75,7 @@ class JIRANO(nn.Module):
         flat = feat.view(-1, self.embedding_dim)  # (bhw, c)
 
         if not self._vq_initialized_from_batch:
+            raise ValueError
             with torch.no_grad():
                 initialtype = self.opt["initial"]
                 if initialtype == "rand":
@@ -106,11 +107,12 @@ class JIRANO(nn.Module):
             q_feat = torch.matmul(p, self.vq.weight)
             q_feat = q_feat.view(b, h, w, -1)  # (b, h, w, c)
         else:
-            q_feat = torch.matmul(encodings, self.vq.weight)  # (bhw, c)
-            q_feat = q_feat.view(b, h, w, -1)  # (b, h, w, c)
-
-            # TODO -> vq_loss explode
-            q_feat = feat + (q_feat - feat).detach()
+            raise ValueError
+            # q_feat = torch.matmul(encodings, self.vq.weight)  # (bhw, c)
+            # q_feat = q_feat.view(b, h, w, -1)  # (b, h, w, c)
+            #
+            # # TODO -> vq_loss explode
+            # q_feat = feat + (q_feat - feat).detach()
 
         q_feat = q_feat.permute(0, 3, 1, 2).contiguous()  # (b, c, h, w)
         prob = torch.softmax(-distance, dim=1)  # (bhw, K)
@@ -120,20 +122,24 @@ class JIRANO(nn.Module):
         cur_update = torch.sum(encodings, dim=0)
         if self.training:
             self.vq0_update += cur_update
-
+        # print("feat", feat[0])
+        # print("q_feat", q_feat[0])
+        # print("assignment", assignment[0])
+        # print("distance", distance[0])
         return feat, q_feat, assignment, distance
 
-    def forward(self, x: torch.Tensor, cur_iter, is_pos: bool = False):
-        feat, x = self.extractor(x)  # Backbone (b, 384, h, w) -> Head : (b, d, h, w),
+    def forward(self, x: torch.Tensor, cur_iter, is_pos: bool = False, local_rank: int = -1):
+        feat, x = self.extractor(x)  # Backbone (b, 384, h, w) -> Head : (b, d, h, w)
+
         if is_pos:
-            return x, feat
+            return feat, x
 
         head, qx, assignment, distance = self._vector_quantize(x, cur_iter)  # (b, d, h, w), (b, K, h, w), (-1, K)
         if self.training:
             if cur_iter % 25 == 0:
                 print("vq", torch.topk(self.vq0_update, 40).values,
                       torch.topk(self.vq0_update, 40, largest=False).values)
-            # print(x.shape, qx.shape)
+
             return x, qx, assignment, distance, None, feat
         else:
             return x, qx
