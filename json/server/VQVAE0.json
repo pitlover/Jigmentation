@@ -5,7 +5,7 @@
     "wandb": {
         "project": "Jigmentation",
         "entity": "00310214aa-",
-        "name": "VQVAE_head",
+        "name": "VQVAE0_head",
         "memo": "VQVAE",
         "mode": "online"
     },
@@ -47,8 +47,8 @@
         "vq_vae" : {
             "in_channel" : 70,
             "channel" : 128,
-            "n_res_block" : 6,
-            "n_res_channel" : 256,
+            "n_res_block" : 2,
+            "n_res_channel" : 32,
             "K" : 1024
         }
     },
