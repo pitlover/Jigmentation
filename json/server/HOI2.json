@@ -5,8 +5,8 @@
     "wandb": {
         "project": "Jigmentation",
         "entity": "00310214aa-",
-        "name": "HOI0_1024_lrdiff_samevqlr_vq",
-        "memo": "HOI0_1024_patch_spqversion",
+        "name": "HOI2_1024_lrdiff_samevqlr_vq",
+        "memo": "HOI2_1024_patch_spqversion",
         "mode": "online"
     },
     "dataset": {
@@ -20,7 +20,7 @@
     },
     "dataloader": {
         "batch_size": 32,
-        "num_workers": 0
+        "num_workers": 8
     },
     "model": {
         "name": "HOI",

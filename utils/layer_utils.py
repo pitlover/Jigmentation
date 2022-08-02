@@ -24,7 +24,7 @@ class ClusterLookup(nn.Module):
 
         if alpha is None:
             cluster_probs = F.one_hot(torch.argmax(inner_products, dim=1), self.clusters.shape[0]) \
-                .permute(0, 3, 1, 2).contiguous().to(torch.float32)
+                .permute(0, 3, 1, 2).to(torch.float32)
         else:
             cluster_probs = nn.functional.softmax(inner_products * alpha, dim=1)
         cluster_loss = -(cluster_probs * inner_products).sum(1).mean()

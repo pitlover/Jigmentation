@@ -5,8 +5,8 @@
     "wandb": {
         "project": "Jigmentation",
         "entity": "00310214aa-",
-        "name": "HOI0_1024_lrdiff_samevqlr",
-        "memo": "HOI0_1024_patch_spqversion",
+        "name": "HOI1_1024_vqlossX",
+        "memo": "HOI1_1024_patch_epc1",
         "mode": "online"
     },
     "dataset": {
@@ -20,7 +20,7 @@
     },
     "dataloader": {
         "batch_size": 32,
-        "num_workers": 0
+        "num_workers": 8
     },
     "model": {
         "name": "HOI",
@@ -32,7 +32,6 @@
         "bn_eps": null,
         "pretrained": {
             "name": "dino",
-            "trainable" : true,
             "model_type": "vit_small",
             "dino_patch_size": 8,
             "dino_feat_type": "feat",
@@ -49,7 +48,7 @@
     },
     "loss": {
         "name": "HOI",
-        "vq_weight": 1.0,
+        "vq_weight": 0.0,
         "vq_loss": {
             "e_weight": 0.25,
             "q_weight": 1.0,

@@ -267,11 +267,7 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
                 raise ValueError(f"Unsupported loss type {out_type}")
 
             detached_code = torch.clone(out.detach())  # (b, 128, 56, 56)
-            # print("detached ", detached_code[0])
-            # print(detached_code.shape)
             linear_output = linear_model(detached_code)
-            # print("linear", linear_output[0])
-            # print("linear", linear_output.shape)
             cluster_output = cluster_model(detached_code, None)
 
             loss, loss_dict, vq_dict, corr_dict = criterion(model_input=model_input,
@@ -335,6 +331,7 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
                         "STEGO_loss": loss_dict["corr"] if opt["loss"].get("corr_weight", 0) > 0 else 0,
                         'vq_loss': loss_dict["vq"] if opt["loss"].get("vq_weight", 0) > 0 else 0,
                         'recon_loss': loss_dict["recon"] if opt["loss"].get("recon_weight", 0) > 0 else 0,
+                        'cross_loss': loss_dict["cross"] if opt["loss"].get("cross_weight", 0) > 0 else 0,
                         "net_lr": optimizer.param_groups[0]['lr'],
                         "param_norm": p_norm.item(),
                         "grad_norm": g_norm.item(),
