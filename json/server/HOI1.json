@@ -5,7 +5,7 @@
     "wandb": {
         "project": "Jigmentation",
         "entity": "00310214aa-",
-        "name": "HOI1_1024_vqlossX",
+        "name": "HOI1_1024_vqlossX_largelr",
         "memo": "HOI1_1024_patch_epc1",
         "mode": "online"
     },
@@ -78,16 +78,16 @@
     "optimizer": {
         "net": {
             "name": "adamw",
-            "lr": 3e-4,
+            "lr": 5e-4,
             "weight_decay": 10e-6
         },
         "linear": {
             "name": "adam",
-            "lr": 3e-3
+            "lr": 5e-3
         },
         "cluster": {
             "name": "adam",
-            "lr": 3e-3
+            "lr": 5e-3
         },
         "vq_optim_weight" : 1.0
     },

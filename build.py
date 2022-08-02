@@ -15,6 +15,7 @@ from utils.layer_utils import ClusterLookup
 from model.DULLI import DULLI
 from model.HOI import HOI
 from model.BOB import BOB
+from model.VQVAE import VQVAE
 from model.JIRANO import JIRANO
 from torch.optim.lr_scheduler import CosineAnnealingLR
 
@@ -37,6 +38,13 @@ def build_model(opt: dict, n_classes: int = 27, device: torch.device = "cuda"):
 
     elif "hoi" in model_type:
         model = HOI.build(
+            opt=opt,
+            n_classes=n_classes,
+            device=device
+        )
+
+    elif "vqvae" in model_type:
+        model = VQVAE.build(
             opt=opt,
             n_classes=n_classes,
             device=device
@@ -79,8 +87,7 @@ def build_model(opt: dict, n_classes: int = 27, device: torch.device = "cuda"):
     # cluster_probe = ClusterLookup(opt["dim"], n_classes + opt["extra_clusters"])
     # linear_probe = nn.Conv2d(opt["dim"], n_classes, (1, 1))
 
-    if model_type in ["dino", "dulli", "hoi", "bob", "stego", "jirano"]:
-        return model, model.cluster_probe, model.linear_probe
+    return model, model.cluster_probe, model.linear_probe
 
 
 def build_criterion(n_classes: int, batch_size: int, opt: dict):
@@ -90,11 +97,13 @@ def build_criterion(n_classes: int, batch_size: int, opt: dict):
         loss = DulliLoss(cfg=opt)
     elif "hoi" in loss_name:
         loss = HoiLoss(n_classes=n_classes, batch_size=batch_size, cfg=opt)
+    elif "vqvae" in loss_name:
+        loss = HoiLoss(n_classes=n_classes, cfg=opt)
     elif "bob" in loss_name:
         loss = BobLoss(n_classes=n_classes, batch_size=batch_size, cfg=opt)
     elif "stego" in loss_name:
         loss = StegoLoss(n_classes=n_classes, cfg=opt)
-    elif "jirano" in loss_name:  # TODO JIRANO loss
+    elif "jirano" in loss_name:
         loss = JiranoLoss(n_classes=n_classes, cfg=opt)
     else:
         raise ValueError(f"Unsupported loss type {loss_name}")
@@ -130,7 +139,7 @@ def split_params_for_optimizer(model, opt):
         {"params": params_base_lr},
         {"params": params_base_lr_no_wd, "weight_decay": 0.0},
         # {"params": params_small_lr, "lr": opt["lr"] * encoder_weight, "weight_decay": opt["weight_decay"] * 0.1},
-        {"params": params_large_lr, "lr": opt["net"]["lr"] * encoder_weight,  "weight_decay": 0.0},
+        {"params": params_large_lr, "lr": opt["net"]["lr"] * encoder_weight, "weight_decay": 0.0},
         {"params": params_large_lr_no_wd, "lr": opt["net"]["lr"] * encoder_weight, "weight_decay": 0.0},
     ]
     return params_for_optimizer
@@ -140,7 +149,7 @@ def build_optimizer(main_params, cluster_params, linear_params, opt: dict, model
     # opt = opt["optimizer"]
     model_type = model_type.lower()
 
-    if "dulli" in model_type or "hoi" in model_type or "stego" in model_type or "bob" in model_type or "jirano" in model_type:
+    if "dulli" in model_type or "hoi" in model_type or "stego" in model_type or "bob" in model_type or "jirano" in model_type or "vqvae" in model_type:
         net_optimizer_type = opt["net"]["name"].lower()
         if net_optimizer_type == "adam":
             net_optimizer = Adam(main_params, lr=opt["net"]["lr"])
@@ -217,7 +226,7 @@ def build_dataset(opt: dict, mode: str = "train", model_type: str = "dino", name
             T.RandomApply([T.GaussianBlur((5, 5))])
         ])
 
-        if "hoi" == name: # cross_loss
+        if "hoi" == name:  # cross_loss
             return ContrastiveSegDataset(
                 pytorch_data_dir=opt["data_path"],
                 dataset_name=opt["data_type"],
@@ -233,7 +242,7 @@ def build_dataset(opt: dict, mode: str = "train", model_type: str = "dino", name
                 pos_labels=False
             )
 
-        elif name in ["bob", "stego", "jirano"]:
+        elif name in ["bob", "stego", "jirano", "vqvae"]:
             return ContrastiveSegDataset(
                 pytorch_data_dir=opt["data_path"],
                 dataset_name=opt["data_type"],

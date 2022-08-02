@@ -24,6 +24,60 @@ def super_perm(size: int, device: torch.device):
     return perm % size
 
 
+class VQVAELoss(nn.Module):
+    def __init__(self,
+                 n_classes: int,
+                 cfg: Dict):
+        super().__init__()
+        self.opt = cfg
+        self.n_classes = n_classes
+
+        self.vq_weight = self.opt["vq_weight"]
+        self.vq_loss = VQLoss(cfg["vq_loss"])
+
+        self.corr_weight = self.opt["corr_weight"]
+        self.corr_loss = ContrastiveCorrelationLoss(cfg["corr_loss"])
+
+        self.recon_weight = self.opt["recon_weight"]
+        self.recon_loss = ReconLoss(cfg["recon_loss"])
+
+        self.linear_loss = LinearLoss(cfg)
+
+    def forward(self, model_input: Tuple,
+                model_output: Tuple,
+                model_pos_output: Tuple,
+                linear_output: torch.Tensor = None,
+                cluster_output: torch.Tensor = None):
+        loss, loss_dict, vq_dict = 0, {}, {}
+        head, qx, assignment, distance, recon, feat = model_output
+
+        if self.vq_weight > 0:
+            vq_loss, vq_dict = self.vq_loss(model_output)
+            loss += self.vq_weight * vq_loss
+            loss_dict["vq"] = vq_loss.item()
+
+        if self.corr_weight > 0:
+            feats_pos, code_pos = model_pos_output
+            corr_loss, corr_loss_dict = self.corr_loss(feat, feats_pos, head, code_pos)
+            loss += self.corr_weight * corr_loss
+            loss_dict["corr"] = corr_loss.item()
+
+        if self.recon_weight > 0:
+            recon_loss = self.recon_loss(model_output)
+            loss += self.recon_weight * recon_loss
+            loss_dict["recon"] = recon_loss.item()
+
+        linear_loss = self.linear_loss(linear_output, model_input[1], self.n_classes)
+
+        cluster_loss = cluster_output[0]
+
+        loss += (linear_loss + cluster_loss)
+        loss_dict["loss"], loss_dict["linear"], loss_dict[
+            "cluster"] = loss.item(), linear_loss.item(), cluster_loss.item()
+
+        return loss, loss_dict, vq_dict, corr_loss_dict
+
+
 class JiranoLoss(nn.Module):
     def __init__(self,
                  n_classes: int,
@@ -607,7 +661,7 @@ class LinearLoss(nn.Module):
         linear_logits = linear_logits.permute(0, 2, 3, 1).reshape(-1, n_classes)
 
         linear_loss = self.linear_loss(
-            linear_logits[mask].contiguous(),
-            flat_label[mask].contiguous()
+            linear_logits[mask],
+            flat_label[mask]
         ).mean()
         return linear_loss

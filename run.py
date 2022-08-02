@@ -111,9 +111,7 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
 
     # ------------------- Optimizer  -----------------------#
     if is_train:
-        # TODO split_params right?
         params_for_optimizer = split_params_for_optimizer(model_m, opt["optimizer"])
-
         # paramas_for_optimizer = model_m.parameters()
         optimizer, cluster_optimizer, linear_optimizer = build_optimizer(
             main_params=params_for_optimizer,

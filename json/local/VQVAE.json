@@ -1,12 +1,12 @@
 {
-    "gpu_ids": [0, 1, 2, 3],
+    "gpu_ids": [0],
     "output_dir": "./output/",
     "checkpoint": null,
     "wandb": {
         "project": "Jigmentation",
         "entity": "00310214aa-",
-        "name": "HOI_1024_res18",
-        "memo": "HOI_1024_res18_trainable_patch_spqversion_kmeans",
+        "name": "VQVAE",
+        "memo": "VQVAE",
         "mode": "online"
     },
     "dataset": {
@@ -20,19 +20,22 @@
     },
     "dataloader": {
         "batch_size": 32,
-        "num_workers": 0
+        "num_workers": 8
     },
     "model": {
-        "name": "HOI",
-        "arch": "resnet18",
+        "name": "VQVAE",
+        "arch": "dino",
         "continuous": true,
-        "dim": 128,
+        "dim": 70,
         "extra_clusters": 0,
         "bn_momentum": null,
         "bn_eps": null,
         "pretrained": {
-            "model_type": "resnet18",
-            "trainable": true,
+            "name": "dino",
+            "trainable" : true,
+            "model_type": "vit_small",
+            "dino_patch_size": 8,
+            "dino_feat_type": "feat",
             "pretrained_weights": null,
             "projection_type": "nonlinear",
             "dropout": true
@@ -45,8 +48,8 @@
         "is_weight_sum": true
     },
     "loss": {
-        "name": "HOI",
-        "vq_weight": 0.0,
+        "name": "VQVAE",
+        "vq_weight": 1.0,
         "vq_loss": {
             "e_weight": 0.25,
             "q_weight": 1.0,
@@ -54,7 +57,7 @@
             "intra_weight": 0.0,
             "inter_weight": 0.0
         },
-        "cross_weight": 1.0,
+        "cross_weight": 0.0,
         "cross_loss": {
             "temperature": 0.5
         },
@@ -71,31 +74,34 @@
             "stabilize": false,
             "feature_samples": 11,
             "neg_samples": 5
+        },
+        "recon_weight" : 1.0,
+        "recon_loss" : {
+
         }
     },
     "optimizer": {
         "net": {
             "name": "adamw",
-            "lr": 3e-4,
-            "weight_decay": 10e-6
-        },
-        "cluster": {
-            "name": "adam",
-            "lr": 3e-3
+            "lr": 5e-4,
+            "weight_decay": 2.0
         },
         "linear": {
             "name": "adam",
-            "lr": 3e-3
+            "lr": 5e-3
         },
-        "vq_optim_weight": 1.0
+        "cluster": {
+            "name": "adam",
+            "lr": 5e-3
+        },
+        "vq_optim_weight" : 10.0
     },
     "scheduler": {
-        "name": "cos"
     },
     "train": {
         "print_freq": 25,
         "valid_freq": 100,
-        "epoch": 5000,
+        "epoch": 1,
         "freeze_encoder_bn": false,
         "freeze_all_bn": 1,
         "num_accum": 1,
