@@ -5,7 +5,7 @@
     "wandb": {
         "project": "Jigmentation",
         "entity": "00310214aa-",
-        "name": "VQVAE",
+        "name": "VQVAE_head",
         "memo": "VQVAE",
         "mode": "online"
     },
@@ -32,7 +32,6 @@
         "bn_eps": null,
         "pretrained": {
             "name": "dino",
-            "trainable" : true,
             "model_type": "vit_small",
             "dino_patch_size": 8,
             "dino_feat_type": "feat",
@@ -83,25 +82,25 @@
     "optimizer": {
         "net": {
             "name": "adamw",
-            "lr": 5e-4,
-            "weight_decay": 2.0
+            "lr": 3e-4,
+            "weight_decay": 10e-6
         },
         "linear": {
             "name": "adam",
-            "lr": 5e-3
+            "lr": 3e-3
         },
         "cluster": {
             "name": "adam",
-            "lr": 5e-3
+            "lr": 3e-3
         },
-        "vq_optim_weight" : 10.0
+        "vq_optim_weight" : 1.0
     },
     "scheduler": {
     },
     "train": {
         "print_freq": 25,
         "valid_freq": 100,
-        "epoch": 1,
+        "epoch": 10,
         "freeze_encoder_bn": false,
         "freeze_all_bn": 1,
         "num_accum": 1,

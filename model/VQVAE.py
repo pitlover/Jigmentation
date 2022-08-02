@@ -1,15 +1,10 @@
 from typing import List, Tuple, Any, Optional
 import torch
 import torch.nn as nn
-import random
 import torch.nn.functional as F
-import kornia.augmentation as Kg
 from utils.layer_utils import ClusterLookup
 from model.dino.DinoFeaturizer import DinoFeaturizer
 from model.res.fpn import Resnet
-import torchvision.transforms as transforms
-import numpy as np
-from kmeans_pytorch import kmeans
 
 
 class Quantize(nn.Module):
@@ -56,7 +51,9 @@ class Quantize(nn.Module):
             embed_normalized = self.embed_avg / cluster_size.unsqueeze(0)
             self.embed.data.copy_(embed_normalized)
 
-        diff = (quantize.detach() - input).pow(2).mean()
+        diff1 = (quantize.detach() - input).pow(2).mean()
+        diff2 = (input.detach() - quantize).pow(2).mean()
+        diff = diff1 + diff2
         quantize = input + (quantize - input).detach()
 
         return quantize, diff, embed_ind
@@ -111,7 +108,8 @@ class Encoder(nn.Module):
         self.blocks = nn.Sequential(*blocks)
 
     def forward(self, input):
-        return self.blocks(input)
+        x = self.blocks(input)
+        return x
 
 
 class Decoder(nn.Module):
@@ -144,9 +142,13 @@ class Decoder(nn.Module):
             )
 
         self.blocks = nn.Sequential(*blocks)
+        self.norm = nn.LayerNorm(out_channel, eps=1e-6)
 
     def forward(self, input):
-        return self.blocks(input)
+        x = self.blocks(input)  # (b, 64, 14, 14)
+        x = self.norm(x.permute(0, 2, 3, 1))  # (b, h, w, c)
+        x = x.permute(0, 3, 1, 2)  # (b, c, h, w)
+        return x
 
 
 class VQVAE(nn.Module):
@@ -183,7 +185,10 @@ class VQVAE(nn.Module):
         embed_dim = 64
         n_embed = 512
 
-        self.enc_b = Encoder(in_channel, channel, n_res_block, n_res_channel, stride=4)
+        final_out_channel = 384
+
+        self.enc_b = Encoder(in_channel, channel, n_res_block, n_res_channel, stride=2)
+        # self.enc_b = Encoder(in_channel, channel, n_res_block, n_res_channel, stride=4)
         self.enc_t = Encoder(channel, channel, n_res_block, n_res_channel, stride=2)
         self.quantize_conv_t = nn.Conv2d(channel, embed_dim, 1)
         self.quantize_t = Quantize(embed_dim, n_embed)
@@ -197,43 +202,47 @@ class VQVAE(nn.Module):
         )
         self.dec = Decoder(
             embed_dim + embed_dim,
-            in_channel,
+            final_out_channel,
             channel,
             n_res_block,
             n_res_channel,
-            stride=4,
+            stride=2,
+            # stride=4,
         )
 
-    def forward(self, input):
-        quant_t, quant_b, diff, _, _ = self.encode(input)
-        dec = self.decode(quant_t, quant_b)
+    def forward(self, input: torch.Tensor, cur_iter: int = -1, local_rank: int = 0):
+        feat, head = self.extractor(input)  # (b, 384, 28, 28) , (b, 70, 28, 28)
+        if not self.training:
+            return head
 
-        return dec, diff
+        quant_t, quant_b, diff, id_t, id_b = self.encode(head)  # (b, 64, 7, 7), (b, 64, 14, 14)
+
+        recon = self.decode(quant_t, quant_b)  # (b, 384, 56, 56)
+        # TODO print vq index
+        return recon, feat, diff, head
 
     def encode(self, input):
-        enc_b = self.enc_b(input)
-        enc_t = self.enc_t(enc_b)
-
-        quant_t = self.quantize_conv_t(enc_t).permute(0, 2, 3, 1)
+        # input : (b, 70, 28, 28)
+        enc_b = self.enc_b(input)  # (b, 128, 14, 14)
+        enc_t = self.enc_t(enc_b)  # (b, 128, 7, 7)
+        quant_t = self.quantize_conv_t(enc_t).permute(0, 2, 3, 1)  # (b, 64, 7, 7) -> (b, 7, 7, 64)
         quant_t, diff_t, id_t = self.quantize_t(quant_t)
-        quant_t = quant_t.permute(0, 3, 1, 2)
+        quant_t = quant_t.permute(0, 3, 1, 2)  # (b, 64, 7, 7)
         diff_t = diff_t.unsqueeze(0)
-
-        dec_t = self.dec_t(quant_t)
-        enc_b = torch.cat([dec_t, enc_b], 1)  # TODO not upsample?
+        dec_t = self.dec_t(quant_t)  # (b, 64, 14, 14)
+        enc_b = torch.cat([dec_t, enc_b], 1)  # (b, 128 + 64, 14, 14)
 
         quant_b = self.quantize_conv_b(enc_b).permute(0, 2, 3, 1)
         quant_b, diff_b, id_b = self.quantize_b(quant_b)
         quant_b = quant_b.permute(0, 3, 1, 2)
-        diff_b = diff_b.unsqueeze(0)
+        diff_b = diff_b.unsqueeze(0)  # (b, 64, 14, 14)
 
         return quant_t, quant_b, diff_t + diff_b, id_t, id_b
 
-    def decode(self, quant_t, quant_b):
-        upsample_t = self.upsample_t(quant_t)
-        quant = torch.cat([upsample_t, quant_b], 1)
-        dec = self.dec(quant)
-
+    def decode(self, quant_t, quant_b):  # (b, 64, 7, 7), (b, 64, 14, 14)
+        upsample_t = self.upsample_t(quant_t)  # (b, 64, 14, 14)
+        quant = torch.cat([upsample_t, quant_b], 1)  # (b, 128, 14, 14)
+        dec = self.dec(quant)  # (b, 384, 56, 56)
         return dec
 
     def decode_code(self, code_t, code_b):

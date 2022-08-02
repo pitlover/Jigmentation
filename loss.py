@@ -48,19 +48,20 @@ class VQVAELoss(nn.Module):
                 model_pos_output: Tuple,
                 linear_output: torch.Tensor = None,
                 cluster_output: torch.Tensor = None):
-        loss, loss_dict, vq_dict = 0, {}, {}
-        head, qx, assignment, distance, recon, feat = model_output
+        loss, loss_dict, vq_dict, corr_loss_dict = 0, {}, {}, {}
+        # head, qx, assignment, distance, recon, feat = model_output
 
         if self.vq_weight > 0:
-            vq_loss, vq_dict = self.vq_loss(model_output)
-            loss += self.vq_weight * vq_loss
-            loss_dict["vq"] = vq_loss.item()
+            recon, feat, diff, qx = model_output
+            # vq_loss, vq_dict = self.vq_loss(model_output)
+            loss += self.vq_weight * diff
+            loss_dict["vq"] = diff.mean()
 
-        if self.corr_weight > 0:
-            feats_pos, code_pos = model_pos_output
-            corr_loss, corr_loss_dict = self.corr_loss(feat, feats_pos, head, code_pos)
-            loss += self.corr_weight * corr_loss
-            loss_dict["corr"] = corr_loss.item()
+        # if self.corr_weight > 0:
+        #     feats_pos, code_pos = model_pos_output
+        #     corr_loss, corr_loss_dict = self.corr_loss(feat, feats_pos, head, code_pos)
+        #     loss += self.corr_weight * corr_loss
+        #     loss_dict["corr"] = corr_loss.item()
 
         if self.recon_weight > 0:
             recon_loss = self.recon_loss(model_output)
@@ -75,7 +76,8 @@ class VQVAELoss(nn.Module):
         loss_dict["loss"], loss_dict["linear"], loss_dict[
             "cluster"] = loss.item(), linear_loss.item(), cluster_loss.item()
 
-        return loss, loss_dict, vq_dict, corr_loss_dict
+        return {"loss": loss, "loss_dict": loss_dict, "vq_dict": vq_dict, "corr_dict": corr_loss_dict}
+        # return loss, loss_dict, vq_dict, corr_loss_dict
 
 
 class JiranoLoss(nn.Module):
@@ -195,7 +197,8 @@ class ReconLoss(nn.Module):
     def forward(self,
                 model_output: Tuple
                 ):
-        x, qx, assignment, distance, recon, feat = model_output
+        # vqvae ver.
+        recon, feat, diff, head = model_output
         mse_loss = self.mse(recon, feat)
 
         return mse_loss
@@ -224,8 +227,8 @@ class HoiLoss(nn.Module):
                 model_output: Tuple,
                 model_pos_output: Tuple,
                 linear_output: torch.Tensor = None,
-                cluster_output: torch.Tensor = None):
-        loss, loss_dict, vq_dict = 0, {}, {}
+                cluster_output: torch.Tensor = None) -> Dict:
+        loss, loss_dict, vq_dict, corr_loss_dict = 0, {}, {}, {}
         head, qx, assignment, distance, recon, feat = model_output
 
         if self.vq_weight > 0:
@@ -251,10 +254,7 @@ class HoiLoss(nn.Module):
         loss_dict["loss"], loss_dict["linear"], loss_dict[
             "cluster"] = loss.item(), linear_loss.item(), cluster_loss.item()
 
-        if self.corr_weight > 0:
-            return loss, loss_dict, vq_dict, corr_loss_dict
-        else:
-            return loss, loss_dict, vq_dict, None
+        return {"loss": loss, "loss_dict": loss_dict, "vq_dict": vq_dict, "corr_loss_dict": corr_loss_dict}
 
 
 class CrossLoss(nn.Module):

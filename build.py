@@ -98,7 +98,7 @@ def build_criterion(n_classes: int, batch_size: int, opt: dict):
     elif "hoi" in loss_name:
         loss = HoiLoss(n_classes=n_classes, batch_size=batch_size, cfg=opt)
     elif "vqvae" in loss_name:
-        loss = HoiLoss(n_classes=n_classes, cfg=opt)
+        loss = VQVAELoss(n_classes=n_classes, cfg=opt)
     elif "bob" in loss_name:
         loss = BobLoss(n_classes=n_classes, batch_size=batch_size, cfg=opt)
     elif "stego" in loss_name:

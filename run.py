@@ -60,7 +60,7 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
 
     # ------------------------ DataLoader ------------------------------#
     if is_train:
-        train_dataset = build_dataset(opt["dataset"], mode="train", model_type=opt["model"]["name"],
+        train_dataset = build_dataset(opt["dataset"], mode="train", model_type=opt["model"]["pretrained"]["model_type"],
                                       name=opt["model"]["name"].lower())
         train_loader = build_dataloader(train_dataset, opt["dataloader"], shuffle=True)
     else:
@@ -261,6 +261,8 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
                     raise ValueError(f"Unsupported loss type {output_type}")
             elif "stego" in out_type:
                 out = model_output[1]
+            elif "vqvae" in out_type:
+                out = model_output[3]
             else:
                 raise ValueError(f"Unsupported loss type {out_type}")
 
@@ -268,11 +270,25 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
             linear_output = linear_model(detached_code)
             cluster_output = cluster_model(detached_code, None)
 
-            loss, loss_dict, vq_dict, corr_dict = criterion(model_input=model_input,
-                                                            model_output=model_output,
-                                                            model_pos_output=model_pos_output if model_pos_output is not None else None,
-                                                            linear_output=linear_output,
-                                                            cluster_output=cluster_output)
+            # loss, loss_dict, vq_dict, corr_dict = criterion(model_input=model_input,
+            #                                                 model_output=model_output,
+            #                                                 model_pos_output=model_pos_output if model_pos_output is not None else None,
+            #                                                 linear_output=linear_output,
+            #                                                 cluster_output=cluster_output)
+            loss_output = criterion(model_input=model_input,
+                                    model_output=model_output,
+                                    model_pos_output=model_pos_output if model_pos_output is not None else None,
+                                    linear_output=linear_output,
+                                    cluster_output=cluster_output)
+
+            loss = loss_output['loss']
+            loss_dict = loss_output['loss_dict']
+
+            if opt["loss"]["vq_weight"] > 0:
+                vq_dict = loss_output['vq_dict']
+
+            if opt["loss"]["corr_weight"] > 0:
+                corr_dict = loss_output['corr_dict']
 
             forward_time = timer.update()
 
@@ -308,10 +324,10 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
                     for loss_k, loss_v in loss_dict.items():
                         if loss_k != "loss":
                             s += f"-- {loss_k}(now): {loss_v:.6f}\n"
-                            if loss_k == "corr":
+                            if opt["loss"]["corr_weight"] > 0 and loss_k == "corr":
                                 for k, v in corr_dict.items():
                                     s += f"  -- {k}(now): {v:.6f}\n"
-                            elif loss_k == "vq":
+                            elif opt["loss"]["vq_weight"] > 0 and loss_k == "vq":
                                 for k, v in vq_dict.items():
                                     s += f"  -- {k}(now): {v:.6f}\n"
                 s += f"time(data/fwd/bwd): {data_time:.3f}/{forward_time:.3f}/{backward_time:.3f}\n"
@@ -476,6 +492,9 @@ def evaluate(model: nn.Module,
 
             if out_type == "stego":
                 out = F.interpolate(model_output[1], label.shape[-2:], mode='bilinear', align_corners=False)
+            elif out_type == "vqvae":
+                model_output = model_output.unsqueeze(0)
+                out = F.interpolate(model_output[0], label.shape[-2:], mode='bilinear', align_corners=False)
             else:
                 if output_type == "vq":
                     out = F.interpolate(model_output[1], label.shape[-2:], mode='bilinear', align_corners=False)
