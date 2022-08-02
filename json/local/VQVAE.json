@@ -5,7 +5,7 @@
     "wandb": {
         "project": "Jigmentation",
         "entity": "00310214aa-",
-        "name": "VQVAE_head",
+        "name": "VQVAE0_head",
         "memo": "VQVAE",
         "mode": "online"
     },
@@ -39,12 +39,18 @@
             "projection_type": "nonlinear",
             "dropout": true
         },
-        "K": 1024,
         "initialize": "uni",
         "initial": null,
         "normalize": false,
         "temperature": 0.2,
-        "is_weight_sum": true
+        "is_weight_sum": true,
+        "vq_vae" : {
+            "in_channel" : 70,
+            "channel" : 128,
+            "n_res_block" : 6,
+            "n_res_channel" : 256,
+            "K" : 1024
+        }
     },
     "loss": {
         "name": "VQVAE",
