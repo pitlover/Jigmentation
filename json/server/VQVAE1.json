@@ -5,7 +5,7 @@
     "wandb": {
         "project": "Jigmentation",
         "entity": "00310214aa-",
-        "name": "VQVAE2_head",
+        "name": "VQVAE1_head_trainable",
         "memo": "VQVAE",
         "mode": "online"
     },
@@ -32,6 +32,7 @@
         "bn_eps": null,
         "pretrained": {
             "name": "dino",
+            "trainable" : true,
             "model_type": "vit_small",
             "dino_patch_size": 8,
             "dino_feat_type": "feat",
@@ -45,10 +46,10 @@
         "temperature": 0.2,
         "is_weight_sum": true,
         "vq_vae" : {
-            "channel" : 256,
+            "channel" : 128,
             "n_res_block" : 6,
             "n_res_channel" : 256,
-            "K" : 512
+            "K" : 1024
         }
     },
     "loss": {

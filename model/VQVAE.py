@@ -177,16 +177,6 @@ class VQVAE(nn.Module):
         self.linear_probe = nn.Conv2d(dim, n_classes, (1, 1))
         self.device = device
 
-        # TODO my mind
-        # local
-        # in_channel = 70
-        # channel = 128
-        # n_res_block = 2
-        # n_res_channel = 32
-        # embed_dim = 64
-        # n_embed = 512
-
-        # server0
         in_channel = dim
         channel = self.opt["vq_vae"]["channel"]
         n_res_block = self.opt["vq_vae"]["n_res_block"]
@@ -194,7 +184,6 @@ class VQVAE(nn.Module):
         embed_dim = in_channel
         n_embed = self.opt["vq_vae"]["K"]
 
-        # 70, 128, 6, 256, 70, 1024
 
         final_out_channel = 384
 
