@@ -68,7 +68,7 @@ class DinoFeaturizer(nn.Module):
             torch.nn.ReLU(),
             torch.nn.Conv2d(in_channels, self.dim, (1, 1)))
 
-    def forward(self, img, n=1, return_class_feat=False, cur_iter=0):
+    def forward(self, img, n=1, return_class_feat=False, cur_iter: int = 0, local_rank: int = 0):
         if self.cfg.get("trainable", False):
             assert (img.shape[2] % self.patch_size == 0)
             assert (img.shape[3] % self.patch_size == 0)

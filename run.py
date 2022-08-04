@@ -264,6 +264,9 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
                 out = model_output[3]
             elif "hier" in out_type:
                 out = model_output[1][1]
+            elif "hihi" in out_type:
+                # TODO need to consider
+                out = model_output[0][0]
             else:
                 raise ValueError(f"Unsupported loss type {out_type}")
 
@@ -498,6 +501,8 @@ def evaluate(model: nn.Module,
                 out = F.interpolate(model_output[0], label.shape[-2:], mode='bilinear', align_corners=False)
             elif out_type == "hier":
                 out = F.interpolate(model_output[0], label.shape[-2:], mode='bilinear', align_corners=False)
+            elif out_type == "hihi":
+                out = F.interpolate(model_output[0], label.shape[-2:], mode='bilinear', align_corners=False)
             else:
                 if output_type == "vq":
                     out = F.interpolate(model_output[1], label.shape[-2:], mode='bilinear', align_corners=False)
@@ -530,7 +535,7 @@ def evaluate(model: nn.Module,
 
         # TODO num_worker bomb
         eval_metrics = get_metrics(cluster_metrics, linear_metrics)
-
+        # eval_metrics = cluster_metrics.compute()
         if opt["is_visualize"]:
             visualization(saved_dir, data_type, saved_data, cluster_metrics)
 

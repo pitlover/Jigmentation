@@ -1,12 +1,12 @@
-    {
-    "gpu_ids": [0, 1, 2, 3],
+{
+    "gpu_ids": [0],
     "output_dir": "./output/",
     "checkpoint": null,
     "wandb": {
         "project": "Jigmentation",
         "entity": "00310214aa-",
-        "name": "JIRANO0_kmeans_posqx",
-        "memo": "JIRANO0_kmeans",
+        "name": "HIHI",
+        "memo": "HIHI",
         "mode": "online"
     },
     "dataset": {
@@ -19,14 +19,14 @@
         "num_neighbors": 7
     },
     "dataloader": {
-        "batch_size": 32,
+        "batch_size": 512,
         "num_workers": 8
     },
     "model": {
-        "name": "JIRANO",
+        "name": "HIHI",
         "arch": "dino",
         "continuous": true,
-        "dim": 70,
+        "dim": 384,
         "extra_clusters": 0,
         "bn_momentum": null,
         "bn_eps": null,
@@ -39,14 +39,42 @@
             "projection_type": "nonlinear",
             "dropout": true
         },
-        "K": 1024,
-        "initialize": "normal",
-        "initial" : "kmeans",
-        "is_weight_sum": true
+        "initialize": "uni",
+        "initial": null,
+        "normalize": false,
+        "temperature": 0.2,
+        "is_weight_sum": true,
+
+        "vq" : {
+            "stage1" : {
+                "K" : 64
+            },
+            "stage2" : {
+                "K" : 256
+            },
+            "stage3" : {
+                "K" : 1024
+            },
+            "channel" : 128,
+            "n_res_block" : 6,
+            "n_res_channel" : 256
+        }
     },
     "loss": {
-        "name": "jirano",
-        "corr_weight": 1.0,
+        "name": "HIHI",
+        "vq_weight": 0.3,
+        "vq_loss": {
+            "e_weight": 0.25,
+            "q_weight": 1.0,
+            "manage_weight": 0.0,
+            "intra_weight": 0.0,
+            "inter_weight": 0.0
+        },
+        "cross_weight": 0.0,
+        "cross_loss": {
+            "temperature": 0.5
+        },
+        "corr_weight": 0.0,
         "corr_loss": {
             "neg_inter_weight": 0.63,
             "pos_inter_weight": 0.25,
@@ -60,41 +88,35 @@
             "feature_samples": 11,
             "neg_samples": 5
         },
-        "vq_weight": 1.0,
-        "vq_loss": {
-            "q_weight": 1.0,
-            "e_weight": 0.25,
-            "manage_weight": 0.0,
-            "intra_weight": 0.0,
-            "inter_weight": 0.0,
-            "topK_weight_sum": 0
+        "recon_weight" : 1.0,
+        "recon_loss" : {
+
         }
     },
     "optimizer": {
         "net": {
             "name": "adamw",
-            "lr": 5e-4,
-            "weight_decay": 2.0
+            "lr": 3e-4,
+            "weight_decay": 10e-6
         },
         "linear": {
             "name": "adam",
-            "lr": 5e-3
+            "lr": 3e-3
         },
         "cluster": {
             "name": "adam",
-            "lr": 5e-3
+            "lr": 3e-3
         },
-        "vq_optim_weight" : 10.0
+        "vq_optim_weight" : 1.0
     },
     "scheduler": {
-        "name": "cos"
     },
     "train": {
         "print_freq": 25,
         "valid_freq": 100,
-        "epoch": 1,
+        "epoch": 10,
         "freeze_encoder_bn": false,
-        "freeze_all_bn": -1,
+        "freeze_all_bn": 1,
         "num_accum": 1,
         "grad_norm": 10.0
     },
@@ -106,6 +128,6 @@
         "is_direct": false,
         "is_diff": false,
         "linear_sep": false,
-        "output": "vq"
+        "output": "head"
     }
 }

@@ -24,7 +24,62 @@ def super_perm(size: int, device: torch.device):
     return perm % size
 
 
-# TODO HIERLoss
+class HIHILoss(nn.Module):
+    def __init__(self,
+                 n_classes: int,
+                 cfg: Dict):
+        super().__init__()
+        self.opt = cfg
+        self.n_classes = n_classes
+
+        self.vq_weight = self.opt["vq_weight"]
+        self.vq_loss = VQLoss(cfg["vq_loss"])
+
+        self.corr_weight = self.opt["corr_weight"]
+        self.corr_loss = ContrastiveCorrelationLoss(cfg["corr_loss"])
+
+        self.recon_weight = self.opt["recon_weight"]
+        self.recon_loss = ReconLoss(cfg["recon_loss"])
+
+        self.linear_loss = LinearLoss(cfg)
+
+    def forward(self, model_input: Tuple,
+                model_output: Tuple,
+                model_pos_output: Tuple,
+                linear_output: torch.Tensor = None,
+                cluster_output: torch.Tensor = None):
+        loss, loss_dict, vq_dict, corr_loss_dict = 0, {}, {}, {}
+        remain_list, vq_loss_list, recon, feat, head = model_output
+
+        if self.vq_weight > 0:
+            vq_loss = sum(vq_loss_list)
+            loss += (self.vq_weight * vq_loss)
+            vq_dict["stage1"] = vq_loss_list[0].item()
+            vq_dict["stage2"] = vq_loss_list[1].item()
+            vq_dict["stage3"] = vq_loss_list[2].item()
+            loss_dict["vq"] = vq_loss.item()
+
+        if self.corr_weight > 0:
+            feats_pos, code_pos = model_pos_output
+            corr_loss, corr_loss_dict = self.corr_loss(feat, feats_pos, head, code_pos)
+            loss += self.corr_weight * corr_loss
+            loss_dict["corr"] = corr_loss.item()
+
+        if self.recon_weight > 0:
+            recon_loss = self.recon_loss(recon, feat)
+            loss += self.recon_weight * recon_loss
+            loss_dict["recon"] = recon_loss.item()
+
+        linear_loss = self.linear_loss(linear_output, model_input[1], self.n_classes)
+        cluster_loss = cluster_output[0]
+
+        loss += (linear_loss + cluster_loss)
+        loss_dict["loss"], loss_dict["linear"], loss_dict[
+            "cluster"] = loss.item(), linear_loss.item(), cluster_loss.item()
+
+        return {"loss": loss, "loss_dict": loss_dict, "vq_dict": vq_dict, "corr_dict": corr_loss_dict}
+
+
 class HIERLoss(nn.Module):
     def __init__(self,
                  n_classes: int,

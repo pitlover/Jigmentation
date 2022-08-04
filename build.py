@@ -17,6 +17,7 @@ from model.BOB import BOB
 from model.VQVAE import VQVAE
 from model.JIRANO import JIRANO
 from model.HIER import HIER
+from model.HIHI import HIHI
 from torch.optim.lr_scheduler import CosineAnnealingLR
 
 
@@ -52,6 +53,13 @@ def build_model(opt: dict, n_classes: int = 27, device: torch.device = "cuda"):
 
     elif "hier" in model_type:
         model = HIER.build(
+            opt=opt,
+            n_classes=n_classes,
+            device=device
+        )
+
+    elif "hihi" in model_type:
+        model = HIHI.build(
             opt=opt,
             n_classes=n_classes,
             device=device
@@ -108,6 +116,8 @@ def build_criterion(n_classes: int, batch_size: int, opt: dict):
         loss = VQVAELoss(n_classes=n_classes, cfg=opt)
     elif "hier" in loss_name:
         loss = HIERLoss(n_classes=n_classes, cfg=opt)
+    elif "hihi" in loss_name:
+        loss = HIHILoss(n_classes=n_classes, cfg=opt)
     elif "bob" in loss_name:
         loss = BobLoss(n_classes=n_classes, batch_size=batch_size, cfg=opt)
     elif "stego" in loss_name:
@@ -158,7 +168,7 @@ def build_optimizer(main_params, cluster_params, linear_params, opt: dict, model
     # opt = opt["optimizer"]
     model_type = model_type.lower()
 
-    if model_type in ["dulli", "hoi", "stego", "bob", "jirano", "vqvae", "hier"]:
+    if model_type in ["dulli", "hoi", "stego", "bob", "jirano", "vqvae", "hier", "hihi"]:
         net_optimizer_type = opt["net"]["name"].lower()
         if net_optimizer_type == "adam":
             net_optimizer = Adam(main_params, lr=opt["net"]["lr"])
@@ -269,7 +279,7 @@ def build_dataset(opt: dict, mode: str = "train", model_type: str = "dino", name
                 pos_labels=True
             )
 
-        elif name in ["hier"]:
+        elif name in ["hier", "hihi"]:
             return ContrastiveSegDataset(
                 pytorch_data_dir=opt["data_path"],
                 dataset_name=opt["data_type"],

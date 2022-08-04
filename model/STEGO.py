@@ -29,7 +29,7 @@ class STEGOmodel(nn.Module):
         self.cluster_probe = ClusterLookup(dim, n_classes + opt["extra_clusters"])
         self.linear_probe = nn.Conv2d(dim, n_classes, (1, 1))
 
-    def forward(self, x: torch.Tensor, cur_iter: int):
+    def forward(self, x: torch.Tensor, cur_iter: int, local_rank: int = 0):
         return self.net(x)
 
     @classmethod

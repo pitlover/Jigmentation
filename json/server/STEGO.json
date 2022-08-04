@@ -46,7 +46,7 @@
         "stabilize" : false,
         "feature_samples" : 11,
         "neg_samples" : 5,
-        "correspondence_weight" : 1.0,
+        "corr_weight" : 1.0,
         "corr_loss" : {
             "neg_inter_weight": 0.63,
             "pos_inter_weight": 0.25,
@@ -55,11 +55,13 @@
             "pos_inter_shift": 0.02,
             "pos_intra_shift": 0.08
         },
-        "vectorquantize_weight" : 0.0,
+        "vq_weight" : 0.0,
         "vq_loss" : {
             "e_weight" : 0.25,
             "is_momentum_type": null
-        }
+        },
+        "cross_weight" : 0.0,
+        "recon_weight" : 0.0
     },
 
     "optimizer": {
@@ -74,7 +76,8 @@
         "cluster" : {
             "name" : "adam",
             "lr" : 5e-3
-        }
+        },
+        "vq_optim_weight" : 0.0
     },
     "scheduler": {
     },
@@ -95,6 +98,7 @@
         "is_visualize" : false,
         "is_direct" :  false,
         "is_diff" : false,
-        "linear_sep" : false
+        "linear_sep" : false,
+        "output" : null
     }
 }

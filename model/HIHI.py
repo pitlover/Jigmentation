@@ -3,16 +3,13 @@ import torch
 import torch.nn as nn
 import random
 import torch.nn.functional as F
-import kornia.augmentation as Kg
 from utils.layer_utils import ClusterLookup
 from model.dino.DinoFeaturizer import DinoFeaturizer
 from model.res.fpn import Resnet
-import torchvision.transforms as transforms
-import numpy as np
 from kmeans_pytorch import kmeans
 
 
-class HIER(nn.Module):
+class HIHI(nn.Module):
     # opt["model"]
     def __init__(self,
                  opt: dict,
@@ -38,8 +35,9 @@ class HIER(nn.Module):
         self.cluster_probe = ClusterLookup(dim, n_classes + opt["extra_clusters"])
         self.linear_probe = nn.Conv2d(dim, n_classes, (1, 1))
 
-        self.K1 = opt["vq"]["semantic"]["K1"]
-        self.K2 = opt["vq"]["class"]["K2"]
+        self.K1 = opt["vq"]["stage1"]["K"]
+        self.K2 = opt["vq"]["stage2"]["K"]
+        self.K3 = opt["vq"]["stage3"]["K"]
         self.embedding_dim = opt["dim"]
         self.normalize = opt["normalize"]
         self.device = device
@@ -47,33 +45,20 @@ class HIER(nn.Module):
         self.n_res_block = opt["vq"]["n_res_block"]
         self.n_res_channel = opt["vq"]["n_res_channel"]
 
-        # ----- semantic ----- #
+        # ----- stage1 ----- #
         self.vq1 = nn.Parameter(torch.rand(self.K1, dim), requires_grad=True)
         self._vq_initialize(self.vq1)
         self.vq1_update = torch.zeros(self.K1, device=self.device)
-        self.avg_pool = nn.AvgPool2d(2, stride=2)
-        self.encoder_semantic = Encoder(
-            in_channel=dim,
-            channel=dim,
-            n_res_channel=self.n_res_channel,
-            n_res_block=self.n_res_block,
-            stride=2
-        )
-        self.conv_semantic = nn.Conv2d(dim, self.channel, 1)
 
-        # ----- class ----- #
+        # ----- stage2 ----- #
         self.vq2 = nn.Parameter(torch.rand(self.K2, dim), requires_grad=True)
         self._vq_initialize(self.vq2)
         self.vq2_update = torch.zeros(self.K2, device=self.device)
-        self.encoder_class = Encoder(
-            in_channel=dim,
-            channel=dim,
-            n_res_block=self.n_res_block,
-            n_res_channel=self.n_res_channel,
-            stride=2)
-        self.conv_class = nn.Conv2d(dim + dim, dim, 1)
-        self.upsample = nn.ConvTranspose2d(dim, dim, 4, stride=2, padding=1)
-        self.decoder_class = Decoder(dim, 384, self.channel, self.n_res_block, self.n_res_channel, stride=2)
+
+        # ----- stage3 ----- #
+        self.vq3 = nn.Parameter(torch.rand(self.K3, dim), requires_grad=True)
+        self._vq_initialize(self.vq3)
+        self.vq3_update = torch.zeros(self.K3, device=self.device)
 
         if self.opt["initial"] == None:
             self._vq_initialized_from_batch = True
@@ -106,8 +91,8 @@ class HIER(nn.Module):
         else:
             raise ValueError(f"Unsupported vq initial type {initial_type}.")
 
-    def _vector_quantize(self, feat: torch.Tensor, codebook: torch.Tensor, K: int, vq_update, cur_iter) -> Tuple[
-        torch.Tensor, torch.Tensor, torch.Tensor]:
+    def _vector_quantize(self, feat: torch.Tensor, codebook: torch.Tensor, K: int, vq_update) -> Tuple[
+        torch.Tensor, torch.Tensor]:
         """
         :param feat:            (batch_size, ch, h, w)
         :param codebook:        (K, ch)
@@ -166,26 +151,18 @@ class HIER(nn.Module):
         #     p = F.softmax(-distance, dim=1)
         #     q_feat = torch.matmul(p, code)  # (bhw, K) x (K, c) = (bhw, c)
         #     q_feat = q_feat.view(b, h, w, -1)  # (b, h, w, c)
+        q_feat = torch.matmul(encodings, code)
+        q_feat = q_feat.view(b, h, w, -1)  # (b, h, w, c)
 
-        if K == self.K1:
-            p = F.softmax(-distance, dim=1)
-            q_feat = torch.matmul(p, code)  # (bhw, K) x (K, c) = (bhw, c)
-            q_feat = q_feat.view(b, h, w, -1)  # (b, h, w, c)
+        q_loss = F.mse_loss(feat.detach(), q_feat)
+        e_loss = F.mse_loss(feat, q_feat.detach())
 
-        elif K == self.K2:  # TODO top1
-            q_feat = torch.matmul(encodings, code)
-            q_feat = q_feat.view(b, h, w, -1)  # (b, h, w, c)
+        diff = (q_loss + e_loss)
+        q_feat = feat + (q_feat - feat).detach()  # (b, h, w, c)
 
-            q_loss = F.mse_loss(feat.detach(), q_feat)
-            e_loss = F.mse_loss(feat, q_feat.detach())
-
-            self.diff = (q_loss + e_loss)
-            q_feat = feat + (q_feat - feat).detach()  # (b, h, w, c)
-        else:
-            raise ValueError("No such vq.")
         q_feat = q_feat.permute(0, 3, 1, 2).contiguous()  # (b, c, h, w)
-        prob = torch.softmax(-distance / self._get_temperature(cur_iter), dim=1)  # (bhw, K)
-        assignment = prob.view(b, h, w, -1).permute(0, 3, 1, 2).contiguous()  # (b, K, h, w)
+        # prob = torch.softmax(-distance / self._get_temperature(cur_iter), dim=1)  # (bhw, K)
+        # assignment = prob.view(b, h, w, -1).permute(0, 3, 1, 2).contiguous()  # (b, K, h, w)
 
         # calculate update
         if self.training:
@@ -193,51 +170,38 @@ class HIER(nn.Module):
             vq_update += cur_update
             # TODO restart
 
-        return q_feat, assignment, distance
+        return q_feat, diff
 
     # TODO model forward
     def forward(self, x: torch.Tensor, cur_iter, is_pos: bool = False, local_rank: int = -1):
-        x_shape = x.shape  # (b, 384, 28, 28), (b, 70, 28, 28)
-        feat, head = self.extractor(x)
+        feat, head = self.extractor(x)  # (b, 384, 28, 28), (b, 384, 28, 28)
 
         if not self.training:
-            result = self._vector_quantize(head, self.vq2, self.K2, self.vq2_update, cur_iter)
+            result = self._vector_quantize(head, self.vq1, self.K1, self.vq1_update)
             return result
-        res_semantic = head  # (b, 70, 28, 28)
-        res_class = self.encoder_class(res_semantic)
 
-        # TODO conv need after head + before quantized?
-        # res_semantic = self.conv_semantic(res_semantic)
-        quantized_semantic, assignment_semantic, distance_semantic = self._vector_quantize(res_semantic, self.vq1,
-                                                                                           self.K1, self.vq1_update,
-                                                                                           cur_iter)  # (b, 70, 28, 28), (b, k1, 28, 28), (-1, k1)
-        # need to match shape q_sematic & q_class
-        # TODO avgpool or encoder?
-        # quantized_semantic = self.avg_pool(quantized_semantic)                # (b, 70, 14, 14)
-        conv_quantized_semantic = self.encoder_semantic(quantized_semantic)  # (b, 70, 14, 14)
+        x1, loss1 = self._vector_quantize(head, self.vq1, self.K1, self.vq1_update)  # (b, 384, 28, 28)
 
-        res_class = torch.cat([res_class, conv_quantized_semantic], dim=1)  # (b, 70+70, 14, 14)
-        res_class = self.conv_class(res_class)  # (b, 70, 14, 14)
-        # TODO class_vq -> top1
-        quantized_class, assignment_class, distance_class = self._vector_quantize(res_class, self.vq2, self.K2,
-                                                                                  self.vq2_update, cur_iter)
-        # (b, 70, 14, 14)
-        recon = self.decoder_class(quantized_class, is_final=True)
-        # upsample class_semantic -> decode (q_semantic, q_class) -> recon
-        # upsample_class = self.upsample(quantized_class)  # (b, 70, 28, 28)
-        # quant = torch.cat([quantized_semantic, upsample_class], dim=1)
-        # dec = self.decoder_class(quant, is_final=True)
+        remain1 = head - x1
+        x2, loss2 = self._vector_quantize(remain1, self.vq2, self.K2, self.vq2_update)  # (b, 384, 28, 28)
+
+        remain2 = remain1 - x2
+        x3, loss3 = self._vector_quantize(remain2, self.vq3, self.K3, self.vq3_update)
+
+        recon = x1 + x2 + x3
 
         # print status of vq
         if self.training and cur_iter % 25 == 0:
-            print(f"*** [{cur_iter}] vq_semantic ***\ntop : ", torch.topk(self.vq1_update, 20).values,
+            print(f"[stage1] coarse\ntop : ", torch.topk(self.vq1_update, 20).values,
                   "\nbottom : ", torch.topk(self.vq1_update, 20, largest=False).values)
-            print(f"*** [{cur_iter}] vq_class ***\ntop : ", torch.topk(self.vq2_update, 20).values,
+            print(f"[stage2] middle\ntop : ", torch.topk(self.vq2_update, 20).values,
                   "\nbottom : ", torch.topk(self.vq2_update, 20, largest=False).values)
+            print(f"[stage3] fine\ntop : ", torch.topk(self.vq3_update, 20).values,
+                  "\nbottom : ", torch.topk(self.vq3_update, 20, largest=False).values)
 
-        return [res_semantic, quantized_semantic, assignment_semantic, distance_semantic], \
-               [res_class, quantized_class, assignment_class, distance_class], \
-               recon, feat, head, self.diff
+        return [x1, x2, x3], \
+               [loss1, loss2, loss3], \
+               recon, feat, head
 
     @classmethod
     def build(cls, opt, n_classes, device):
