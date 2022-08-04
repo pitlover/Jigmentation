@@ -91,7 +91,8 @@ class HIHI(nn.Module):
         else:
             raise ValueError(f"Unsupported vq initial type {initial_type}.")
 
-    def _vector_quantize(self, feat: torch.Tensor, codebook: torch.Tensor, K: int, vq_update) -> Tuple[
+    def _vector_quantize(self, feat: torch.Tensor, codebook: torch.Tensor, K: int, vq_update, cur_iter: int = -1) -> \
+    Tuple[
         torch.Tensor, torch.Tensor]:
         """
         :param feat:            (batch_size, ch, h, w)
@@ -169,10 +170,13 @@ class HIHI(nn.Module):
             cur_update = torch.sum(encodings, dim=0)
             vq_update += cur_update
             # TODO restart
+            if cur_iter % 25 == 0 and K == self.K1:
+                top2 = torch.topk(distance, 2).values
+                top1_2_distance = top2[:, 0] - top2[:, 1]
+                print("top1-2 : ", top1_2_distance.mean())
 
         return q_feat, diff
 
-    # TODO model forward
     def forward(self, x: torch.Tensor, cur_iter, is_pos: bool = False, local_rank: int = -1):
         feat, head = self.extractor(x)  # (b, 384, 28, 28), (b, 384, 28, 28)
 
@@ -180,15 +184,16 @@ class HIHI(nn.Module):
             result = self._vector_quantize(head, self.vq1, self.K1, self.vq1_update)
             return result
 
-        x1, loss1 = self._vector_quantize(head, self.vq1, self.K1, self.vq1_update)  # (b, 384, 28, 28)
-
+        x1, loss1 = self._vector_quantize(head, self.vq1, self.K1, self.vq1_update, cur_iter)  # (b, 384, 28, 28)
         remain1 = head - x1
+
         x2, loss2 = self._vector_quantize(remain1, self.vq2, self.K2, self.vq2_update)  # (b, 384, 28, 28)
-
         remain2 = remain1 - x2
-        x3, loss3 = self._vector_quantize(remain2, self.vq3, self.K3, self.vq3_update)
 
-        recon = x1 + x2 + x3
+        x3, loss3 = self._vector_quantize(remain2, self.vq3, self.K3, self.vq3_update)
+        remain3 = remain2 - x3
+
+        recon = (x1 + x2 + x3 + remain3)
 
         # print status of vq
         if self.training and cur_iter % 25 == 0:
@@ -219,92 +224,3 @@ class HIHI(nn.Module):
         for p in self.parameters():
             count += p.numel()
         return count
-
-
-class Encoder(nn.Module):
-    def __init__(self, in_channel, channel, n_res_block, n_res_channel, stride):
-        super().__init__()
-
-        if stride == 4:
-            blocks = [
-                nn.Conv2d(in_channel, channel // 2, 4, stride=2, padding=1),
-                nn.ReLU(inplace=True),
-                nn.Conv2d(channel // 2, channel, 4, stride=2, padding=1),
-                nn.ReLU(inplace=True),
-                nn.Conv2d(channel, channel, 3, padding=1),
-            ]
-
-        elif stride == 2:
-            blocks = [
-                nn.Conv2d(in_channel, channel // 2, 4, stride=2, padding=1),
-                nn.ReLU(inplace=True),
-                nn.Conv2d(channel // 2, channel, 3, padding=1),
-            ]
-
-        for i in range(n_res_block):
-            blocks.append(ResBlock(channel, n_res_channel))
-
-        blocks.append(nn.ReLU(inplace=True))
-
-        self.blocks = nn.Sequential(*blocks)
-
-    def forward(self, input):
-        return self.blocks(input)
-
-
-class ResBlock(nn.Module):
-    def __init__(self, in_channel, channel):
-        super().__init__()
-
-        self.conv = nn.Sequential(
-            nn.ReLU(),
-            nn.Conv2d(in_channel, channel, 3, padding=1),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(channel, in_channel, 1),
-        )
-
-    def forward(self, input):
-        out = self.conv(input)
-        out += input
-
-        return out
-
-
-class Decoder(nn.Module):
-    def __init__(
-            self, in_channel, out_channel, channel, n_res_block, n_res_channel, stride
-    ):
-        super().__init__()
-
-        blocks = [nn.Conv2d(in_channel, channel, 3, padding=1)]
-
-        for i in range(n_res_block):
-            blocks.append(ResBlock(channel, n_res_channel))
-
-        blocks.append(nn.ReLU(inplace=True))
-
-        if stride == 4:
-            blocks.extend(
-                [
-                    nn.ConvTranspose2d(channel, channel // 2, 4, stride=2, padding=1),
-                    nn.ReLU(inplace=True),
-                    nn.ConvTranspose2d(
-                        channel // 2, out_channel, 4, stride=2, padding=1
-                    ),
-                ]
-            )
-
-        elif stride == 2:
-            blocks.append(
-                nn.ConvTranspose2d(channel, out_channel, 4, stride=2, padding=1)
-            )
-
-        self.blocks = nn.Sequential(*blocks)
-        self.norm = nn.LayerNorm(out_channel, eps=1e-6)
-
-    def forward(self, x: torch.Tensor, is_final: bool = False):
-        x = self.blocks(x)  # (b, 64, 14, 14)
-        if is_final:
-            x = self.norm(x.permute(0, 2, 3, 1))  # (b, h, w, c)
-            x = x.permute(0, 3, 1, 2)  # (b, c, h, w)
-        return x

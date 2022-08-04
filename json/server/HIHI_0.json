@@ -5,7 +5,7 @@
     "wandb": {
         "project": "Jigmentation",
         "entity": "00310214aa-",
-        "name": "HIHI",
+        "name": "HIHI_128_vq0.1",
         "memo": "HIHI",
         "mode": "online"
     },
@@ -62,7 +62,7 @@
     },
     "loss": {
         "name": "HIHI",
-        "vq_weight": 0.3,
+        "vq_weight": 0.1,
         "vq_loss": {
             "e_weight": 0.25,
             "q_weight": 1.0,
