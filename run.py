@@ -118,7 +118,7 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
             cluster_params=cluster_model.parameters(),
             linear_params=linear_model.parameters(),
             opt=opt["optimizer"],
-            model_type=opt["wandb"]["name"]
+            model_type=opt["model"]["name"]
         )
 
     else:
@@ -235,7 +235,6 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
                                  local_rank=local_rank)  # head : (b, 70, 28, 28) quantized : (b, 70, 28, 28)
             #  x, qx, assignment, distance, recon, feat
 
-            # TODO check pos->raw or qutized?
             model_pos_output = None
             if opt["loss"]["corr_weight"] > 0.0:
                 if "hoi" in opt["model"]["name"].lower() or "jirano" in opt["model"]["name"].lower():
@@ -263,6 +262,8 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
                 out = model_output[1]
             elif "vqvae" in out_type:
                 out = model_output[3]
+            elif "hier" in out_type:
+                out = model_output[1][1]
             else:
                 raise ValueError(f"Unsupported loss type {out_type}")
 
@@ -277,7 +278,7 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
             #                                                 cluster_output=cluster_output)
             loss_output = criterion(model_input=model_input,
                                     model_output=model_output,
-                                    model_pos_output=model_pos_output if model_pos_output is not None else None,
+                                    model_pos_output=model_pos_output,
                                     linear_output=linear_output,
                                     cluster_output=cluster_output)
 
@@ -495,6 +496,8 @@ def evaluate(model: nn.Module,
             elif out_type == "vqvae":
                 model_output = model_output.unsqueeze(0)
                 out = F.interpolate(model_output[0], label.shape[-2:], mode='bilinear', align_corners=False)
+            elif out_type == "hier":
+                out = F.interpolate(model_output[0], label.shape[-2:], mode='bilinear', align_corners=False)
             else:
                 if output_type == "vq":
                     out = F.interpolate(model_output[1], label.shape[-2:], mode='bilinear', align_corners=False)
@@ -525,6 +528,7 @@ def evaluate(model: nn.Module,
                 saved_data["linear_preds1"].append(linear_preds.cpu().squeeze(0))
                 saved_data["label"].append(label.cpu().squeeze(0))
 
+        # TODO num_worker bomb
         eval_metrics = get_metrics(cluster_metrics, linear_metrics)
 
         if opt["is_visualize"]:

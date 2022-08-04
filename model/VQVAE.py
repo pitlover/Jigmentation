@@ -51,9 +51,7 @@ class Quantize(nn.Module):
             embed_normalized = self.embed_avg / cluster_size.unsqueeze(0)
             self.embed.data.copy_(embed_normalized)
 
-        diff1 = (quantize.detach() - input).pow(2).mean()
-        diff2 = (input.detach() - quantize).pow(2).mean()
-        diff = diff1 + diff2
+        diff = (quantize.detach() - input).pow(2).mean()
         quantize = input + (quantize - input).detach()
 
         return quantize, diff, embed_ind

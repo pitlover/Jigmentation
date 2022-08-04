@@ -1,5 +1,4 @@
 from typing import Optional, Dict
-
 import torch
 from torch.optim import Adam, AdamW, SGD
 import torch.distributed as dist
@@ -17,6 +16,7 @@ from model.HOI import HOI
 from model.BOB import BOB
 from model.VQVAE import VQVAE
 from model.JIRANO import JIRANO
+from model.HIER import HIER
 from torch.optim.lr_scheduler import CosineAnnealingLR
 
 
@@ -45,6 +45,13 @@ def build_model(opt: dict, n_classes: int = 27, device: torch.device = "cuda"):
 
     elif "vqvae" in model_type:
         model = VQVAE.build(
+            opt=opt,
+            n_classes=n_classes,
+            device=device
+        )
+
+    elif "hier" in model_type:
+        model = HIER.build(
             opt=opt,
             n_classes=n_classes,
             device=device
@@ -99,6 +106,8 @@ def build_criterion(n_classes: int, batch_size: int, opt: dict):
         loss = HoiLoss(n_classes=n_classes, batch_size=batch_size, cfg=opt)
     elif "vqvae" in loss_name:
         loss = VQVAELoss(n_classes=n_classes, cfg=opt)
+    elif "hier" in loss_name:
+        loss = HIERLoss(n_classes=n_classes, cfg=opt)
     elif "bob" in loss_name:
         loss = BobLoss(n_classes=n_classes, batch_size=batch_size, cfg=opt)
     elif "stego" in loss_name:
@@ -149,7 +158,7 @@ def build_optimizer(main_params, cluster_params, linear_params, opt: dict, model
     # opt = opt["optimizer"]
     model_type = model_type.lower()
 
-    if "dulli" in model_type or "hoi" in model_type or "stego" in model_type or "bob" in model_type or "jirano" in model_type or "vqvae" in model_type:
+    if model_type in ["dulli", "hoi", "stego", "bob", "jirano", "vqvae", "hier"]:
         net_optimizer_type = opt["net"]["name"].lower()
         if net_optimizer_type == "adam":
             net_optimizer = Adam(main_params, lr=opt["net"]["lr"])
@@ -260,7 +269,7 @@ def build_dataset(opt: dict, mode: str = "train", model_type: str = "dino", name
                 pos_labels=True
             )
 
-        else:
+        elif name in ["hier"]:
             return ContrastiveSegDataset(
                 pytorch_data_dir=opt["data_path"],
                 dataset_name=opt["data_type"],
@@ -277,6 +286,8 @@ def build_dataset(opt: dict, mode: str = "train", model_type: str = "dino", name
                 pos_images=False,
                 pos_labels=False
             )
+        else:
+            raise ValueError("No dataset: {} found".format(name))
 
     elif mode == "val" or mode == "test":
         if mode == "test":
@@ -332,5 +343,5 @@ def build_dataloader(dataset,
             num_workers=(opt["num_workers"] + world_size - 1) // world_size,
             pin_memory=pin_memory,
             sampler=ddp_sampler,
-            # prefetch_factor=opt.get("prefetch_factor", 1)
+            prefetch_factor=opt.get("prefetch_factor", 2)
         )

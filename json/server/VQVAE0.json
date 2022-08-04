@@ -32,6 +32,7 @@
         "bn_eps": null,
         "pretrained": {
             "name": "dino",
+            "trainable" : true,
             "model_type": "vit_small",
             "dino_patch_size": 8,
             "dino_feat_type": "feat",
@@ -48,7 +49,7 @@
             "channel" : 128,
             "n_res_block" : 2,
             "n_res_channel" : 32,
-            "K" : 1024
+            "K" : 256
         }
     },
     "loss": {

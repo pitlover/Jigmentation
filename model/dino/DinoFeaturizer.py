@@ -92,7 +92,6 @@ class DinoFeaturizer(nn.Module):
             if return_class_feat:
                 return feat[:, :1, :].reshape(feat.shape[0], 1, 1, -1).permute(0, 3, 1, 2)
 
-
         else:
             self.model.eval()
             with torch.no_grad():

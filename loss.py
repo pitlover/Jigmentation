@@ -24,6 +24,64 @@ def super_perm(size: int, device: torch.device):
     return perm % size
 
 
+# TODO HIERLoss
+class HIERLoss(nn.Module):
+    def __init__(self,
+                 n_classes: int,
+                 cfg: Dict):
+        super().__init__()
+        self.opt = cfg
+        self.n_classes = n_classes
+
+        self.vq_weight = self.opt["vq_weight"]
+        self.vq_loss = VQLoss(cfg["vq_loss"])
+
+        self.corr_weight = self.opt["corr_weight"]
+        self.corr_loss = ContrastiveCorrelationLoss(cfg["corr_loss"])
+
+        self.recon_weight = self.opt["recon_weight"]
+        self.recon_loss = ReconLoss(cfg["recon_loss"])
+
+        self.linear_loss = LinearLoss(cfg)
+
+    def forward(self, model_input: Tuple,
+                model_output: Tuple,
+                model_pos_output: Tuple,
+                linear_output: torch.Tensor = None,
+                cluster_output: torch.Tensor = None):
+        loss, loss_dict, vq_dict, corr_loss_dict = 0, {}, {}, {}
+        semantic_list, class_list, recon, feat, head, vq_class_loss = model_output
+
+        if self.vq_weight > 0:
+            vq_semantic_loss, vq_semantic_dict = self.vq_loss(model_output[0])
+            # vq_class_loss, vq_class_dict = self.vq_loss(model_output[1])
+            loss += self.vq_weight * (vq_semantic_loss + vq_class_loss)
+            vq_dict["vq_semantic"] = vq_semantic_loss.item()
+            vq_dict["vq_class"] = vq_class_loss.item()
+            loss_dict["vq"] = (vq_semantic_loss.item() + vq_class_loss.item())
+
+        if self.corr_weight > 0:
+            feats_pos, code_pos = model_pos_output
+            corr_loss, corr_loss_dict = self.corr_loss(feat, feats_pos, head, code_pos)
+            loss += self.corr_weight * corr_loss
+            loss_dict["corr"] = corr_loss.item()
+
+        if self.recon_weight > 0:
+            recon_loss = self.recon_loss(recon, feat)
+            loss += self.recon_weight * recon_loss
+            loss_dict["recon"] = recon_loss.item()
+
+        linear_loss = self.linear_loss(linear_output, model_input[1], self.n_classes)
+
+        cluster_loss = cluster_output[0]
+
+        loss += (linear_loss + cluster_loss)
+        loss_dict["loss"], loss_dict["linear"], loss_dict[
+            "cluster"] = loss.item(), linear_loss.item(), cluster_loss.item()
+
+        return {"loss": loss, "loss_dict": loss_dict, "vq_dict": vq_dict, "corr_dict": corr_loss_dict}
+
+
 class VQVAELoss(nn.Module):
     def __init__(self,
                  n_classes: int,
@@ -195,12 +253,10 @@ class ReconLoss(nn.Module):
         self.mse = nn.MSELoss()
 
     def forward(self,
-                model_output: Tuple
+                recon: torch.Tensor,
+                feat: torch.Tensor
                 ):
-        # vqvae ver.
-        recon, feat, diff, head = model_output
         mse_loss = self.mse(recon, feat)
-
         return mse_loss
 
 
@@ -443,7 +499,7 @@ class VQLoss(nn.Module):
     def forward(self, model_output, is_hoi: bool = False):
         loss = 0
         vq_dict = {}
-        head, quantized, assignment, distance, recon, feat = model_output
+        head, quantized, assignment, distance = model_output[:4]
 
         if is_hoi:
             head = head[0].permute(0, 2, 3, 1).contiguous()
@@ -454,6 +510,7 @@ class VQLoss(nn.Module):
 
         q_loss = F.mse_loss(head.detach(), quantized)
         e_loss = F.mse_loss(head, quantized.detach())
+
         # print("vq head", head[0])
         # print("vq quantized", quantized[0])
         # print("vq", head.shape, quantized.shape) # (b, h, w, c)
@@ -471,9 +528,9 @@ class VQLoss(nn.Module):
             inter_loss = -avg_entropy  # maximization
 
             if self.opt["intra_weight"] > 0.0:
-                vq_dict[f"intra"] = intra_loss
+                vq_dict["intra"] = intra_loss
             if self.opt["inter_weight"] > 0.0:
-                vq_dict[f"inter"] = inter_loss
+                vq_dict["inter"] = inter_loss
 
             loss += (self.opt["intra_weight"] * intra_loss + self.opt["inter_weight"] * inter_loss)
 

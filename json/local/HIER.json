@@ -5,8 +5,8 @@
     "wandb": {
         "project": "Jigmentation",
         "entity": "00310214aa-",
-        "name": "VQVAE_head_trainable",
-        "memo": "VQVAE",
+        "name": "HIER",
+        "memo": "HIER",
         "mode": "online"
     },
     "dataset": {
@@ -23,7 +23,7 @@
         "num_workers": 8
     },
     "model": {
-        "name": "VQVAE",
+        "name": "HIER",
         "arch": "dino",
         "continuous": true,
         "dim": 70,
@@ -32,7 +32,6 @@
         "bn_eps": null,
         "pretrained": {
             "name": "dino",
-            "trainable" : false,
             "model_type": "vit_small",
             "dino_patch_size": 8,
             "dino_feat_type": "feat",
@@ -45,15 +44,21 @@
         "normalize": false,
         "temperature": 0.2,
         "is_weight_sum": true,
-        "vq_vae" : {
+
+        "vq" : {
+            "semantic" : {
+                "K1" : 1024
+            },
+            "class" : {
+                "K2" : 32
+            },
             "channel" : 128,
             "n_res_block" : 6,
-            "n_res_channel" : 256,
-            "K" : 1024
+            "n_res_channel" : 256
         }
     },
     "loss": {
-        "name": "VQVAE",
+        "name": "HIER",
         "vq_weight": 1.0,
         "vq_loss": {
             "e_weight": 0.25,
