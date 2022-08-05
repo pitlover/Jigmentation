@@ -17,7 +17,8 @@ from model.BOB import BOB
 from model.VQVAE import VQVAE
 from model.JIRANO import JIRANO
 from model.HIER import HIER
-from model.HIHI import HIHI
+from model.HIHI_2 import HIHI2 as HIHI
+# from model.HIHI import HIHI # TODO replace
 from torch.optim.lr_scheduler import CosineAnnealingLR
 
 

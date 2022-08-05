@@ -66,7 +66,7 @@ class HIHILoss(nn.Module):
             loss_dict["corr"] = corr_loss.item()
 
         if self.recon_weight > 0:
-            recon_loss = self.recon_loss(recon, head)
+            recon_loss = self.recon_loss(recon, feat)
             loss += self.recon_weight * recon_loss
             loss_dict["recon"] = recon_loss.item()
 

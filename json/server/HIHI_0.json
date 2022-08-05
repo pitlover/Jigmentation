@@ -5,8 +5,8 @@
     "wandb": {
         "project": "Jigmentation",
         "entity": "00310214aa-",
-        "name": "HIHI0_128_vq0.1",
-        "memo": "HIHI",
+        "name": "HIHI0_64_96_128_enclinear_head384",
+        "memo": "HIHI0",
         "mode": "online"
     },
     "dataset": {
@@ -50,22 +50,24 @@
                 "K" : 64
             },
             "stage2" : {
-                "K" : 256
+                "K" : 96
             },
             "stage3" : {
-                "K" : 1024
+                "K" : 128
             },
             "channel" : 128,
             "n_res_block" : 6,
-            "n_res_channel" : 256
+            "n_res_channel" : 256,
+            "decay" : 0.99,
+            "e_weight": 0.25,
+            "q_weight": 1.0,
+            "is_ema" : true
         }
     },
     "loss": {
         "name": "HIHI",
-        "vq_weight": 0.1,
+        "vq_weight": 1.0,
         "vq_loss": {
-            "e_weight": 0.25,
-            "q_weight": 1.0,
             "manage_weight": 0.0,
             "intra_weight": 0.0,
             "inter_weight": 0.0

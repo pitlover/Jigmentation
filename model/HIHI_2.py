@@ -9,7 +9,7 @@ from model.res.fpn import Resnet
 from kmeans_pytorch import kmeans
 
 
-class HIHI(nn.Module):
+class HIHI2(nn.Module):
     # opt["model"]
     def __init__(self,
                  opt: dict,
@@ -26,7 +26,7 @@ class HIHI(nn.Module):
             dim = opt["dim"]
 
         if opt["arch"] == "dino":
-            self.extractor = DinoFeaturizer(dim, opt)
+            self.extractor = DinoFeaturizer(dim, opt, use_head=False)
         elif opt["arch"] == "resnet18":
             self.extractor = Resnet(opt)
         else:
@@ -50,9 +50,22 @@ class HIHI(nn.Module):
         self.e_weight = opt["vq"]["e_weight"]
         self.is_ema = opt["vq"]["is_ema"]
 
+        if self.is_ema:
+            print("HIHI2 currently only supports parameterized ver. Changed!")
+            self.is_ema = False
+
         self.vq1_update = torch.zeros(self.K1, device=self.device)
         self.vq2_update = torch.zeros(self.K2, device=self.device)
         self.vq3_update = torch.zeros(self.K3, device=self.device)
+
+        # TODO encoder architecture
+        # self.enc_proj = nn.Sequential(
+        #     nn.Conv2d(384, dim // 4, kernel_size=1, stride=1),
+        #     nn.ReLU(inplace=True),
+        #     nn.Conv2d(dim // 4, dim, kernel_size=1, stride=1)
+        # )
+        self.enc_proj = nn.Conv2d(dim, dim, kernel_size=1, stride=1)
+        self.dec_proj = nn.Conv2d(dim, 384, kernel_size=1, stride=1)
 
         if self.is_ema:
             # EMA style
@@ -75,6 +88,15 @@ class HIHI(nn.Module):
             self.register_buffer("vq3_cluster_size", torch.zeros(self.K3))
             self.register_buffer("vq3_avg", embed.clone())
 
+            self.register_buffer("scale0", torch.ones(dim, 1, 1))
+            self.register_buffer("bias0", torch.zeros(dim, 1, 1))
+
+            self.register_buffer("scale1", torch.ones(dim, 1, 1))
+            self.register_buffer("bias1", torch.zeros(dim, 1, 1))
+
+            self.register_buffer("scale2", torch.ones(dim, 1, 1))
+            self.register_buffer("bias2", torch.zeros(dim, 1, 1))
+
         else:
             # Loss style
             # ----- stage1 ----- #
@@ -88,6 +110,15 @@ class HIHI(nn.Module):
             # ----- stage3 ----- #
             self.vq3 = nn.Parameter(torch.rand(self.K3, dim), requires_grad=True)
             self._vq_initialize(self.vq3)
+
+            self.scale0 = nn.Parameter(torch.ones(dim, 1, 1))
+            self.bias0 = nn.Parameter(torch.zeros(dim, 1, 1))
+
+            self.scale1 = nn.Parameter(torch.ones(dim, 1, 1))
+            self.bias1 = nn.Parameter(torch.zeros(dim, 1, 1))
+
+            self.scale2 = nn.Parameter(torch.ones(dim, 1, 1))
+            self.bias2 = nn.Parameter(torch.zeros(dim, 1, 1))
 
         if self.opt["initial"] == None:
             self._vq_initialized_from_batch = True
@@ -278,6 +309,9 @@ class HIHI(nn.Module):
 
     def forward(self, x: torch.Tensor, cur_iter: int = -1, is_pos: bool = False, local_rank: int = -1):
         feat, head = self.extractor(x)  # (b, 384, 28, 28), (b, 384, 28, 28)
+
+        head = self.enc_proj(feat)  # (b, 384, 28, 28)
+
         if self.is_ema:
             # EMA style
             if not self.training:
@@ -291,8 +325,9 @@ class HIHI(nn.Module):
             remain2 = remain1 - x2
 
             x3, loss3 = self._ema_quantize(remain2, self.K3, cur_iter)  # (b, 384, 28, 28)
-            remain3 = remain2 - x3
+            # remain3 = remain2 - x3
 
+            raise NotImplementedError("Scale and bias update not yet applied.")
         else:
             # Loss style
             if not self.training:
@@ -300,16 +335,26 @@ class HIHI(nn.Module):
                 return result
 
             # Loss style
-            x1, loss1 = self._vector_quantize(head, self.vq1, self.K1, self.vq1_update, cur_iter)  # (b, 384, 28, 28)
-            remain1 = head - x1
+            head_normalized = (head - self.bias0) / self.scale0
+            x1, loss1 = self._vector_quantize(head_normalized, self.vq1, self.K1, self.vq1_update,
+                                              cur_iter)  # (b, 384, 28, 28)
+            remain1 = head_normalized - x1
 
-            x2, loss2 = self._vector_quantize(remain1, self.vq2, self.K2, self.vq2_update)  # (b, 384, 28, 28)
-            remain2 = remain1 - x2
+            remain1_normalized = (remain1 - self.bias1) / self.scale1
+            x2, loss2 = self._vector_quantize(remain1_normalized, self.vq2, self.K2,
+                                              self.vq2_update)  # (b, 384, 28, 28)
+            remain2 = remain1_normalized - x2
 
-            x3, loss3 = self._vector_quantize(remain2, self.vq3, self.K3, self.vq3_update)
+            remain2_normalized = (remain2 - self.bias2) / self.scale2
+            x3, loss3 = self._vector_quantize(remain2_normalized, self.vq3, self.K3, self.vq3_update)
             # remain3 = remain2 - x3
 
-        recon = (x1 + x2 + x3)
+            # ----- roll back ---- #
+            recon2 = x3 * self.scale2 + self.bias2
+            recon1 = (recon2 + x2) * self.scale1 + self.bias1
+            recon0 = (recon1 + x1) * self.scale0 + self.bias0
+
+        recon = self.dec_proj(recon0)
 
         # print status of vq
         if self.training and cur_iter % 25 == 0:

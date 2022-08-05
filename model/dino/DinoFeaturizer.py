@@ -5,7 +5,7 @@ import model.dino.vision_transformer as vits
 
 class DinoFeaturizer(nn.Module):
 
-    def __init__(self, dim, cfg):  # cfg["pretrained"]
+    def __init__(self, dim, cfg, use_head: bool = True):  # cfg["pretrained"]
         super().__init__()
         self.cfg = cfg
         self.dim = dim
@@ -53,10 +53,15 @@ class DinoFeaturizer(nn.Module):
             self.n_feats = 384
         else:
             self.n_feats = 768
-        self.cluster1 = self.make_clusterer(self.n_feats)
-        self.proj_type = cfg["pretrained"]["projection_type"]
-        if self.proj_type == "nonlinear":
-            self.cluster2 = self.make_nonlinear_clusterer(self.n_feats)
+
+        self.use_head = use_head
+        if use_head:
+            self.cluster1 = self.make_clusterer(self.n_feats)
+            self.proj_type = cfg["pretrained"]["projection_type"]
+            if self.proj_type == "nonlinear":
+                self.cluster2 = self.make_nonlinear_clusterer(self.n_feats)
+        else:
+            self.cluster1 = self.cluster2 = None
 
     def make_clusterer(self, in_channels):
         return torch.nn.Sequential(
@@ -69,6 +74,7 @@ class DinoFeaturizer(nn.Module):
             torch.nn.Conv2d(in_channels, self.dim, (1, 1)))
 
     def forward(self, img, n=1, return_class_feat=False, cur_iter: int = 0, local_rank: int = 0):
+
         if self.cfg.get("trainable", False):
             assert (img.shape[2] % self.patch_size == 0)
             assert (img.shape[3] % self.patch_size == 0)
@@ -117,10 +123,14 @@ class DinoFeaturizer(nn.Module):
 
                 if return_class_feat:
                     return feat[:, :1, :].reshape(feat.shape[0], 1, 1, -1).permute(0, 3, 1, 2).contiguous()
-        if self.proj_type is not None:
-            code = self.cluster1(self.dropout(image_feat))
-            if self.proj_type == "nonlinear":
-                code += self.cluster2(self.dropout(image_feat))
+
+        if self.use_head:
+            if self.proj_type is not None:
+                code = self.cluster1(self.dropout(image_feat))
+                if self.proj_type == "nonlinear":
+                    code += self.cluster2(self.dropout(image_feat))
+            else:
+                code = image_feat
         else:
             code = image_feat
 
