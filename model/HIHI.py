@@ -44,21 +44,49 @@ class HIHI(nn.Module):
         self.channel = opt["vq"]["channel"]
         self.n_res_block = opt["vq"]["n_res_block"]
         self.n_res_channel = opt["vq"]["n_res_channel"]
+        self.decay = opt["vq"]["decay"]
+        self.eps = 1e-5
+        self.q_weight = opt["vq"]["q_weight"]
+        self.e_weight = opt["vq"]["e_weight"]
+        self.is_ema = opt["vq"]["is_ema"]
 
-        # ----- stage1 ----- #
-        self.vq1 = nn.Parameter(torch.rand(self.K1, dim), requires_grad=True)
-        self._vq_initialize(self.vq1)
         self.vq1_update = torch.zeros(self.K1, device=self.device)
-
-        # ----- stage2 ----- #
-        self.vq2 = nn.Parameter(torch.rand(self.K2, dim), requires_grad=True)
-        self._vq_initialize(self.vq2)
         self.vq2_update = torch.zeros(self.K2, device=self.device)
-
-        # ----- stage3 ----- #
-        self.vq3 = nn.Parameter(torch.rand(self.K3, dim), requires_grad=True)
-        self._vq_initialize(self.vq3)
         self.vq3_update = torch.zeros(self.K3, device=self.device)
+
+        if self.is_ema:
+            # EMA style
+            # ----- stage1 ----- #
+            embed = torch.randn(dim, self.K1)
+            self.register_buffer("vq1", embed)
+            self.register_buffer("vq1_cluster_size", torch.zeros(self.K1))
+            self.register_buffer("vq1_avg", embed.clone())
+
+            # ----- stage2 ----- #
+            embed = torch.randn(dim, self.K2)
+            self.register_buffer("vq2", embed)
+            self.register_buffer("vq2_cluster_size", torch.zeros(self.K2))
+            self.register_buffer("vq2_avg", embed.clone())
+
+            # ----- stage3 ----- #
+            embed = torch.randn(dim, self.K3)
+            self.register_buffer("vq3", embed)
+            self.register_buffer("vq3_cluster_size", torch.zeros(self.K3))
+            self.register_buffer("vq3_avg", embed.clone())
+
+        else:
+            # Loss style
+            # ----- stage1 ----- #
+            self.vq1 = nn.Parameter(torch.rand(self.K1, dim), requires_grad=True)
+            self._vq_initialize(self.vq1)
+
+            # ----- stage2 ----- #
+            self.vq2 = nn.Parameter(torch.rand(self.K2, dim), requires_grad=True)
+            self._vq_initialize(self.vq2)
+
+            # ----- stage3 ----- #
+            self.vq3 = nn.Parameter(torch.rand(self.K3, dim), requires_grad=True)
+            self._vq_initialize(self.vq3)
 
         if self.opt["initial"] == None:
             self._vq_initialized_from_batch = True
@@ -91,9 +119,78 @@ class HIHI(nn.Module):
         else:
             raise ValueError(f"Unsupported vq initial type {initial_type}.")
 
+    def _ema_quantize(self, feat: torch.Tensor, K, cur_iter: int = -1):
+        if K == self.K1:
+            embed = self.vq1
+            cluster_size = self.vq1_cluster_size
+            embed_avg = self.vq1_avg
+            vq_update = self.vq1_update
+        elif K == self.K2:
+            embed = self.vq2
+            cluster_size = self.vq2_cluster_size
+            embed_avg = self.vq2_avg
+            vq_update = self.vq2_update
+        elif K == self.K3:
+            embed = self.vq3
+            cluster_size = self.vq3_cluster_size
+            embed_avg = self.vq3_avg
+            vq_update = self.vq3_update
+        else:
+            raise ValueError(f"No required K : {K}")
+
+        b, c, h, w = feat.shape
+        k, _ = embed.shape
+
+        feat = feat.permute(0, 2, 3, 1).contiguous()  # (b, h, w, c)
+        flat = feat.view(-1, c)  # (bhw, c)
+
+        distance = (torch.sum(flat ** 2, dim=1, keepdim=True)  # (flat - embed.weight) ^ 2
+                    + torch.sum(embed ** 2, dim=0)
+                    - 2 * torch.matmul(flat, embed))  # (bhw, K)
+
+        # smaller distance == higher probability
+        _, embed_ind = (-distance).max(1)
+        embed_onehot = F.one_hot(embed_ind, K).type(flat.dtype)
+        embed_ind = embed_ind.view(*feat.shape[:-1])
+
+        quantize = self.embed_code(embed_ind, embed)
+
+        if self.training:
+            embed_onehot_sum = embed_onehot.sum(0)
+            embed_sum = flat.transpose(0, 1) @ embed_onehot
+
+            # dist_fn.all_reduce(embed_onehot_sum)
+            # dist_fn.all_reduce(embed_sum)
+
+            cluster_size.data.mul_(self.decay).add_(
+                embed_onehot_sum, alpha=1 - self.decay
+            )
+            embed_avg.data.mul_(self.decay).add_(embed_sum, alpha=1 - self.decay)
+            n = cluster_size.sum()
+            cluster_size_ = (
+                    (cluster_size + self.eps) / (n + K * self.eps) * n
+            )
+            embed_normalized = embed_avg / cluster_size_.unsqueeze(0)
+            embed.data.copy_(embed_normalized)
+
+            vq_update += embed_onehot_sum
+            # TODO restart
+            if cur_iter % 25 == 0 and K == self.K1:
+                top2 = torch.topk(distance, 2).values
+                top1_2_distance = top2[:, 0] - top2[:, 1]
+                print("top1-2 : ", top1_2_distance.mean())
+
+        diff = self.q_weight * F.mse_loss(quantize.detach(), feat)
+        q_feat = feat + (quantize - feat).detach()  # (b, h, w, c)
+        q_feat = q_feat.permute(0, 3, 1, 2).contiguous()  # (b, c, h, w)
+
+        return q_feat, diff
+
+    def embed_code(self, embed_id, embed):
+        return F.embedding(embed_id, embed.transpose(0, 1))
+
     def _vector_quantize(self, feat: torch.Tensor, codebook: torch.Tensor, K: int, vq_update, cur_iter: int = -1) -> \
-    Tuple[
-        torch.Tensor, torch.Tensor]:
+            Tuple[torch.Tensor, torch.Tensor]:
         """
         :param feat:            (batch_size, ch, h, w)
         :param codebook:        (K, ch)
@@ -101,6 +198,7 @@ class HIHI(nn.Module):
                 output feat:    (batch_size, ch, h, w)
                 assignment:     (batch_size, K, h, w)
         """
+
         b, c, h, w = feat.shape
         k, _ = codebook.shape
 
@@ -158,7 +256,7 @@ class HIHI(nn.Module):
         q_loss = F.mse_loss(feat.detach(), q_feat)
         e_loss = F.mse_loss(feat, q_feat.detach())
 
-        diff = (q_loss + e_loss)
+        diff = (self.q_weight * q_loss + self.e_weight * e_loss)
         q_feat = feat + (q_feat - feat).detach()  # (b, h, w, c)
 
         q_feat = q_feat.permute(0, 3, 1, 2).contiguous()  # (b, c, h, w)
@@ -177,21 +275,36 @@ class HIHI(nn.Module):
 
         return q_feat, diff
 
-    def forward(self, x: torch.Tensor, cur_iter, is_pos: bool = False, local_rank: int = -1):
+    def forward(self, x: torch.Tensor, cur_iter: int = -1, is_pos: bool = False, local_rank: int = -1):
         feat, head = self.extractor(x)  # (b, 384, 28, 28), (b, 384, 28, 28)
+        if self.is_ema:
+            # EMA style
+            if not self.training:
+                result = self._ema_quantize(head, self.K1)
+                return result
 
-        if not self.training:
-            result = self._vector_quantize(head, self.vq1, self.K1, self.vq1_update)
-            return result
+            x1, loss1 = self._ema_quantize(head, self.K1, cur_iter)  # (b, 384, 28, 28)
+            remain1 = head - x1
 
-        x1, loss1 = self._vector_quantize(head, self.vq1, self.K1, self.vq1_update, cur_iter)  # (b, 384, 28, 28)
-        remain1 = head - x1
+            x2, loss2 = self._ema_quantize(remain1, self.K2, cur_iter)  # (b, 384, 28, 28)
+            remain2 = remain1 - x2
+            x3, loss3 = self._ema_quantize(remain2, self.K3, cur_iter)  # (b, 384, 28, 28)
+            remain3 = remain2 - x3
+        else:
+            # Loss style
+            if not self.training:
+                result = self._vector_quantize(head, self.vq1, self.K1, self.vq1_update)
+                return result
 
-        x2, loss2 = self._vector_quantize(remain1, self.vq2, self.K2, self.vq2_update)  # (b, 384, 28, 28)
-        remain2 = remain1 - x2
+            # Loss style
+            x1, loss1 = self._vector_quantize(head, self.vq1, self.K1, self.vq1_update, cur_iter)  # (b, 384, 28, 28)
+            remain1 = head - x1
 
-        x3, loss3 = self._vector_quantize(remain2, self.vq3, self.K3, self.vq3_update)
-        remain3 = remain2 - x3
+            x2, loss2 = self._vector_quantize(remain1, self.vq2, self.K2, self.vq2_update)  # (b, 384, 28, 28)
+            remain2 = remain1 - x2
+
+            x3, loss3 = self._vector_quantize(remain2, self.vq3, self.K3, self.vq3_update)
+            remain3 = remain2 - x3
 
         recon = (x1 + x2 + x3 + remain3)
 

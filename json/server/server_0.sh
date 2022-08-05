@@ -1,0 +1,1 @@
+CUDA_VISIBLE_DEVICES=0 python3 run.py --opt ./json/server/HIHI_0.json --debug

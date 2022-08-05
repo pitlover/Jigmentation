@@ -155,8 +155,10 @@ class UnsupervisedMetrics(Metric):
 
 
 def get_metrics(m1: UnsupervisedMetrics, m2: UnsupervisedMetrics) -> Dict[str, Any]:
-    metrics = all_reduce_dict(m1.compute(), op="mean")
-    tmp1 = all_reduce_dict(m2.compute(), op="mean")
-    metrics.update(tmp1)
+    # metrics = all_reduce_dict(m1.compute(), op="mean")
+    # tmp1 = all_reduce_dict(m2.compute(), op="mean")
+    metric1 = m1.compute()
+    metric2 = m2.compute()
+    metric1.update(metric2)
 
-    return metrics
+    return metric1

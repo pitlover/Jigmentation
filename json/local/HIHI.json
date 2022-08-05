@@ -57,15 +57,17 @@
             },
             "channel" : 128,
             "n_res_block" : 6,
-            "n_res_channel" : 256
+            "n_res_channel" : 256,
+            "decay" : 0.99,
+            "e_weight": 0.25,
+            "q_weight": 1.0,
+            "is_ema" : true
         }
     },
     "loss": {
         "name": "HIHI",
-        "vq_weight": 0.3,
+        "vq_weight": 1.0,
         "vq_loss": {
-            "e_weight": 0.25,
-            "q_weight": 1.0,
             "manage_weight": 0.0,
             "intra_weight": 0.0,
             "inter_weight": 0.0
