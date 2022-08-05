@@ -1,11 +1,12 @@
 from datetime import datetime
 from typing import Dict
 import time
+import os
+
 import torch
 import torch.nn as nn
 from torch.nn.parallel.distributed import DistributedDataParallel
 import json
-import os
 from collections import OrderedDict
 
 

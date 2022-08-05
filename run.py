@@ -535,7 +535,7 @@ def evaluate(model: nn.Module,
 
         # TODO num_worker bomb
         eval_metrics = get_metrics(cluster_metrics, linear_metrics)
-        # eval_metrics = cluster_metrics.compute()
+
         if opt["is_visualize"]:
             visualization(saved_dir, data_type, saved_data, cluster_metrics)
 

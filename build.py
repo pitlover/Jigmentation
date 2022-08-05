@@ -352,6 +352,5 @@ def build_dataloader(dataset,
             batch_size=max(batch_size // world_size, 1),
             num_workers=(opt["num_workers"] + world_size - 1) // world_size,
             pin_memory=pin_memory,
-            sampler=ddp_sampler,
-            prefetch_factor=opt.get("prefetch_factor", 2)
+            sampler=ddp_sampler
         )

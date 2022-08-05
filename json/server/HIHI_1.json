@@ -5,7 +5,7 @@
     "wandb": {
         "project": "Jigmentation",
         "entity": "00310214aa-",
-        "name": "HIHI0_128_vq0.1",
+        "name": "HIHI1_128_vq0.1",
         "memo": "HIHI",
         "mode": "online"
     },
