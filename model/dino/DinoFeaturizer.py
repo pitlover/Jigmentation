@@ -123,6 +123,7 @@ class DinoFeaturizer(nn.Module):
                 code += self.cluster2(self.dropout(image_feat))
         else:
             code = image_feat
+
         if self.cfg["pretrained"]["dropout"]:
             return self.dropout(image_feat), code
         else:

@@ -190,7 +190,7 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
     freeze_encoder_bn = opt["train"]["freeze_encoder_bn"]
     freeze_all_bn = opt["train"]["freeze_all_bn"]  # epoch
 
-    for m in model.modules():
+    for m in model.modules(): # Not used in this template
         if isinstance(m, (nn.BatchNorm1d, nn.BatchNorm2d, nn.SyncBatchNorm)):
             m.momentum /= num_accum
 
@@ -201,6 +201,7 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
         print_fn(f"-------- [{current_epoch}/{max_epoch} (iters: {current_iter})]--------")
 
         g_norm = torch.zeros(1, dtype=torch.float32, device=device)  # placeholder
+
         if is_distributed:
             train_loader.sampler.set_epoch(current_epoch)  # noqa, necessary for DistributedSampler to be shuffled.
 
@@ -265,7 +266,7 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
             elif "hier" in out_type:
                 out = model_output[1][1]
             elif "hihi" in out_type:
-                # TODO need to consider
+                # TODO need to consider -> head or qx1
                 out = model_output[0][0]
             else:
                 raise ValueError(f"Unsupported loss type {out_type}")

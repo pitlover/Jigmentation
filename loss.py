@@ -66,7 +66,7 @@ class HIHILoss(nn.Module):
             loss_dict["corr"] = corr_loss.item()
 
         if self.recon_weight > 0:
-            recon_loss = self.recon_loss(recon, feat)
+            recon_loss = self.recon_loss(recon, head)
             loss += self.recon_weight * recon_loss
             loss_dict["recon"] = recon_loss.item()
 
@@ -309,9 +309,9 @@ class ReconLoss(nn.Module):
 
     def forward(self,
                 recon: torch.Tensor,
-                feat: torch.Tensor
+                ori: torch.Tensor
                 ):
-        mse_loss = self.mse(recon, feat)
+        mse_loss = self.mse(recon, ori)
         return mse_loss
 
 
