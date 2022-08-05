@@ -106,7 +106,8 @@ class DinoFeaturizer(nn.Module):
                 feat_w = img.shape[3] // self.patch_size
 
                 if self.feat_type == "feat":
-                    image_feat = feat[:, 1:, :].reshape(feat.shape[0], feat_h, feat_w, -1).permute(0, 3, 1, 2)
+                    image_feat = feat[:, 1:, :].reshape(feat.shape[0], feat_h, feat_w, -1).permute(0, 3, 1,
+                                                                                                   2).contiguous()
                 elif self.feat_type == "KK":
                     image_k = qkv[1, :, :, 1:, :].reshape(feat.shape[0], 6, feat_h, feat_w, -1)
                     B, H, I, J, D = image_k.shape
@@ -115,15 +116,13 @@ class DinoFeaturizer(nn.Module):
                     raise ValueError("Unknown feat type:{}".format(self.feat_type))
 
                 if return_class_feat:
-                    return feat[:, :1, :].reshape(feat.shape[0], 1, 1, -1).permute(0, 3, 1, 2)
-
+                    return feat[:, :1, :].reshape(feat.shape[0], 1, 1, -1).permute(0, 3, 1, 2).contiguous()
         if self.proj_type is not None:
             code = self.cluster1(self.dropout(image_feat))
             if self.proj_type == "nonlinear":
                 code += self.cluster2(self.dropout(image_feat))
         else:
             code = image_feat
-
         if self.cfg["pretrained"]["dropout"]:
             return self.dropout(image_feat), code
         else:
