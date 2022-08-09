@@ -5,7 +5,7 @@
     "wandb": {
         "project": "Jigmentation",
         "entity": "00310214aa-",
-        "name": "HIHI0_64_96_128_enclinear_head384",
+        "name": "HIHI0_1024_1024_1024",
         "memo": "HIHI0",
         "mode": "online"
     },
@@ -47,13 +47,13 @@
 
         "vq" : {
             "stage1" : {
-                "K" : 64
+                "K" : 1024
             },
             "stage2" : {
-                "K" : 96
+                "K" : 1024
             },
             "stage3" : {
-                "K" : 128
+                "K" : 1024
             },
             "channel" : 128,
             "n_res_block" : 6,
@@ -61,7 +61,7 @@
             "decay" : 0.99,
             "e_weight": 0.25,
             "q_weight": 1.0,
-            "is_ema" : true
+            "is_ema" : false
         }
     },
     "loss": {
@@ -120,7 +120,7 @@
         "freeze_encoder_bn": false,
         "freeze_all_bn": 1,
         "num_accum": 1,
-        "grad_norm": 10.0
+        "grad_norm": 100.0
     },
     "eval": {
         "extra_clusters": 0,
@@ -130,6 +130,6 @@
         "is_direct": false,
         "is_diff": false,
         "linear_sep": false,
-        "output": "head"
+        "output": "vq"
     }
 }

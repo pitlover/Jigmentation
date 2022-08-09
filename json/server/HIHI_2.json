@@ -1,12 +1,12 @@
 {
-    "gpu_ids": [0],
+    "gpu_ids": [0, 1],
     "output_dir": "./output/",
     "checkpoint": null,
     "wandb": {
         "project": "Jigmentation",
         "entity": "00310214aa-",
-        "name": "HIHI2_ema_vq1",
-        "memo": "HIHI2_ema",
+        "name": "HIHI3",
+        "memo": "HIHI3",
         "mode": "online"
     },
     "dataset": {
@@ -47,10 +47,10 @@
 
         "vq" : {
             "stage1" : {
-                "K" : 64
+                "K" : 1024
             },
             "stage2" : {
-                "K" : 256
+                "K" : 1024
             },
             "stage3" : {
                 "K" : 1024
@@ -115,12 +115,12 @@
     },
     "train": {
         "print_freq": 25,
-        "valid_freq": 100,
-        "epoch": 10,
+        "valid_freq": 25,
+        "epoch": 20,
         "freeze_encoder_bn": false,
         "freeze_all_bn": 1,
         "num_accum": 1,
-        "grad_norm": 10.0
+        "grad_norm": 100.0
     },
     "eval": {
         "extra_clusters": 0,
@@ -130,6 +130,6 @@
         "is_direct": false,
         "is_diff": false,
         "linear_sep": false,
-        "output": "head"
+        "output": "vq"
     }
 }

@@ -266,8 +266,10 @@ def run(opt: dict, is_test: bool = False, is_debug: bool = False):  # noqa
             elif "hier" in out_type:
                 out = model_output[1][1]
             elif "hihi" in out_type:
-                # TODO need to consider -> head or qx1
-                out = model_output[0][0]
+                if output_type == "vq":
+                    out = model_output[0][0]
+                elif output_type == "head":
+                    out = model_output[4]
             else:
                 raise ValueError(f"Unsupported loss type {out_type}")
 
@@ -503,7 +505,10 @@ def evaluate(model: nn.Module,
             elif out_type == "hier":
                 out = F.interpolate(model_output[0], label.shape[-2:], mode='bilinear', align_corners=False)
             elif out_type == "hihi":
-                out = F.interpolate(model_output[0], label.shape[-2:], mode='bilinear', align_corners=False)
+                if output_type == "vq":
+                    out = F.interpolate(model_output[0][0], label.shape[-2:], mode='bilinear', align_corners=False)
+                elif output_type == "head":
+                    out = F.interpolate(model_output[1], label.shape[-2:], mode='bilinear', align_corners=False)
             else:
                 if output_type == "vq":
                     out = F.interpolate(model_output[1], label.shape[-2:], mode='bilinear', align_corners=False)

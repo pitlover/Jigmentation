@@ -95,6 +95,7 @@ class UnsupervisedMetrics(Metric):
                        default=torch.zeros(n_classes + self.extra_clusters, n_classes,
                                            dtype=torch.int64, device="cuda"),
                        dist_reduce_fx="sum")
+        # self.stats = torch.zeros(n_classes + self.extra_clusters, n_classes, dtype=torch.int64, device="cuda")
 
     def update(self, preds: torch.Tensor, target: torch.Tensor):
         with torch.no_grad():
@@ -155,8 +156,9 @@ class UnsupervisedMetrics(Metric):
 
 
 def get_metrics(m1: UnsupervisedMetrics, m2: UnsupervisedMetrics) -> Dict[str, Any]:
-    # metrics = all_reduce_dict(m1.compute(), op="mean")
-    # tmp1 = all_reduce_dict(m2.compute(), op="mean")
+    # TODO check
+    # metric1 = all_reduce_dict(m1.compute(), op="mean")
+    # metric2 = all_reduce_dict(m2.compute(), op="mean")
     metric1 = m1.compute()
     metric2 = m2.compute()
     metric1.update(metric2)
